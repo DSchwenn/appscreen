@@ -308,7 +308,7 @@ function movePopout(id, direction) {
     updatePopoutsList();
 }
 
-function addGraphicElement(img, src, name) {
+function addGraphicElement(img, src, name, svgRaw = null) {
     const screenshot = getCurrentScreenshot();
     if (!screenshot) return;
     if (!screenshot.elements) screenshot.elements = [];
@@ -323,6 +323,8 @@ function addGraphicElement(img, src, name) {
         image: img,
         src: src,
         name: name || 'Graphic',
+        svgRaw: svgRaw,
+        svgColor: null,
         text: '',
         font: "-apple-system, BlinkMacSystemFont, 'SF Pro Display'",
         fontSize: 60,
@@ -1702,15 +1704,49 @@ function migrate3DPosition(screenshotSettings) {
     screenshotSettings.y = Math.max(0, Math.min(100, 50 + (oldY - 50) * yFactor));
 }
 
+// Colorize an SVG string by replacing all non-none fill/stroke with a given color
+function colorizeGraphicSVG(svgText, color) {
+    return svgText
+        .replace(/\bfill="(?!(none|transparent))[^"]*"/gi, `fill="${color}"`)
+        .replace(/\bstroke="(?!(none|transparent))[^"]*"/gi, `stroke="${color}"`)
+        .replace(/\bfill\s*:\s*(?!(none|transparent))[^;"'}]+/gi, `fill:${color}`)
+        .replace(/\bstroke\s*:\s*(?!(none|transparent))[^;"'}]+/gi, `stroke:${color}`);
+}
+
+// Regenerate the image for a graphic element with optional SVG color override
+function updateGraphicSVGColor(el) {
+    if (!el.svgRaw) return;
+    const svgText = el.svgColor ? colorizeGraphicSVG(el.svgRaw, el.svgColor) : el.svgRaw;
+    const blob = new Blob([svgText], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+        URL.revokeObjectURL(url);
+        el.image = img;
+        updateCanvas();
+    };
+    img.src = url;
+}
+
 // Reconstruct Image objects for graphic/icon elements from saved data
 function reconstructElementImages(elements) {
     if (!elements || !Array.isArray(elements)) return [];
     return elements.map(el => {
         const restored = { ...el };
         if (el.type === 'graphic' && el.src) {
-            const img = new Image();
-            img.src = el.src;
-            restored.image = img;
+            if (el.svgRaw && el.svgColor) {
+                // Re-apply SVG color on load
+                const svgText = colorizeGraphicSVG(el.svgRaw, el.svgColor);
+                const blob = new Blob([svgText], { type: 'image/svg+xml' });
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                img.onload = () => { URL.revokeObjectURL(url); restored.image = img; updateCanvas(); };
+                img.src = url;
+            } else {
+                const img = new Image();
+                img.src = el.src;
+                restored.image = img;
+            }
         } else if (el.type === 'icon' && el.iconName) {
             // Async fetch; image will be null initially, then updateCanvas() when ready
             getLucideImage(el.iconName, el.iconColor || '#ffffff', el.iconStrokeWidth || 2)
@@ -2573,12 +2609,22 @@ function updateElementProperties() {
     // Type-specific properties
     const textProps = document.getElementById('element-text-properties');
     const iconProps = document.getElementById('element-icon-properties');
+    const svgProps = document.getElementById('element-graphic-svg-properties');
 
     // Hide all type-specific panels first
     textProps.style.display = 'none';
     if (iconProps) iconProps.style.display = 'none';
+    if (svgProps) svgProps.style.display = 'none';
 
-    if (el.type === 'text') {
+    if (el.type === 'graphic' && el.svgRaw && svgProps) {
+        svgProps.style.display = '';
+        const enabled = !!el.svgColor;
+        document.getElementById('element-svg-color-enabled').checked = enabled;
+        document.getElementById('element-svg-color-picker-row').style.display = enabled ? '' : 'none';
+        const color = el.svgColor || '#ffffff';
+        document.getElementById('element-svg-color').value = color;
+        document.getElementById('element-svg-color-hex').value = color;
+    } else if (el.type === 'text') {
         textProps.style.display = '';
         document.getElementById('element-text-input').value = getElementText(el);
         document.getElementById('element-font').value = el.font;
@@ -2632,15 +2678,28 @@ function setupElementEventListeners() {
         graphicInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                const img = new Image();
-                img.onload = () => {
-                    addGraphicElement(img, ev.target.result, file.name);
+            const isSVG = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+            if (isSVG) {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const svgText = ev.target.result;
+                    // Build a data URL from the raw SVG text
+                    const encoded = btoa(unescape(encodeURIComponent(svgText)));
+                    const dataUrl = 'data:image/svg+xml;base64,' + encoded;
+                    const img = new Image();
+                    img.onload = () => { addGraphicElement(img, dataUrl, file.name, svgText); };
+                    img.src = dataUrl;
                 };
-                img.src = ev.target.result;
-            };
-            reader.readAsDataURL(file);
+                reader.readAsText(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => { addGraphicElement(img, ev.target.result, file.name); };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
             graphicInput.value = '';
         });
     }
@@ -2666,6 +2725,52 @@ function setupElementEventListeners() {
     // Icon color picker
     const iconColor = document.getElementById('element-icon-color');
     const iconColorHex = document.getElementById('element-icon-color-hex');
+
+    // SVG graphic color override
+    const svgColorEnabled = document.getElementById('element-svg-color-enabled');
+    const svgColorPicker = document.getElementById('element-svg-color');
+    const svgColorHex = document.getElementById('element-svg-color-hex');
+    const svgColorPickerRow = document.getElementById('element-svg-color-picker-row');
+
+    if (svgColorEnabled) {
+        svgColorEnabled.addEventListener('change', () => {
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || !el.svgRaw) return;
+            if (svgColorEnabled.checked) {
+                el.svgColor = svgColorPicker ? svgColorPicker.value : '#ffffff';
+                if (svgColorPickerRow) svgColorPickerRow.style.display = '';
+            } else {
+                el.svgColor = null;
+                if (svgColorPickerRow) svgColorPickerRow.style.display = 'none';
+            }
+            updateGraphicSVGColor(el);
+            saveState();
+        });
+    }
+    if (svgColorPicker) {
+        svgColorPicker.addEventListener('input', () => {
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || !el.svgRaw) return;
+            el.svgColor = svgColorPicker.value;
+            if (svgColorHex) svgColorHex.value = svgColorPicker.value;
+            updateGraphicSVGColor(el);
+        });
+        svgColorPicker.addEventListener('change', () => {
+            saveState();
+        });
+    }
+    if (svgColorHex) {
+        svgColorHex.addEventListener('change', () => {
+            if (!/^#[0-9a-fA-F]{6}$/.test(svgColorHex.value)) return;
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || !el.svgRaw) return;
+            el.svgColor = svgColorHex.value;
+            if (svgColorPicker) svgColorPicker.value = svgColorHex.value;
+            updateGraphicSVGColor(el);
+            saveState();
+        });
+    }
+
     if (iconColor) {
         iconColor.addEventListener('input', () => {
             const el = getSelectedElement();
