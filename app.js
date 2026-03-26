@@ -1551,6 +1551,138 @@ function saveState() {
     }
 }
 
+// Export all project data (all IndexedDB projects + localStorage settings) as a JSON file
+async function exportAllData() {
+    if (!db) {
+        await showAppAlert('Database not available. Cannot export data.', 'error');
+        return;
+    }
+
+    try {
+        // Read all projects from IndexedDB
+        const allProjects = await new Promise((resolve, reject) => {
+            const transaction = db.transaction([PROJECTS_STORE, META_STORE], 'readonly');
+            const projectsStore = transaction.objectStore(PROJECTS_STORE);
+            const metaStore = transaction.objectStore(META_STORE);
+
+            const projectsReq = projectsStore.getAll();
+            const metaProjectsReq = metaStore.get('projects');
+            const metaCurrentReq = metaStore.get('currentProject');
+
+            transaction.oncomplete = () => {
+                resolve({
+                    projects: projectsReq.result || [],
+                    metaProjects: metaProjectsReq.result || null,
+                    metaCurrent: metaCurrentReq.result || null
+                });
+            };
+            transaction.onerror = () => reject(transaction.error);
+        });
+
+        // Collect relevant localStorage keys
+        const lsKeys = [
+            'activeTab', 'themePreference', 'aiProvider',
+            'claudeApiKey', 'openaiApiKey', 'googleApiKey',
+            'anthropicModel', 'openaiModel', 'googleModel',
+            'magicalTitlesTooltipDismissed'
+        ];
+        const localStorageData = {};
+        lsKeys.forEach(key => {
+            const val = localStorage.getItem(key);
+            if (val !== null) localStorageData[key] = val;
+        });
+
+        const exportPayload = {
+            exportVersion: 1,
+            exportedAt: new Date().toISOString(),
+            dbName: DB_NAME,
+            dbVersion: DB_VERSION,
+            indexedDB: allProjects,
+            localStorage: localStorageData
+        };
+
+        const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `appscreen-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error('Export failed:', e);
+        await showAppAlert('Export failed: ' + e.message, 'error');
+    }
+}
+
+// Import all project data from a previously exported JSON file
+async function importAllData() {
+    if (!db) {
+        await showAppAlert('Database not available. Cannot import data.', 'error');
+        return;
+    }
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+
+    input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+            const payload = JSON.parse(text);
+
+            if (!payload.exportVersion || !payload.indexedDB || !payload.localStorage) {
+                await showAppAlert('Invalid backup file. Please select a file exported from this app.', 'error');
+                return;
+            }
+
+            const confirmed = await showAppConfirm(
+                `Import backup from ${payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : 'unknown date'}?\n\nThis will replace ALL current projects and settings. This cannot be undone.`,
+                'Import Data'
+            );
+            if (!confirmed) return;
+
+            // Restore IndexedDB
+            const { projects: projectRows, metaProjects, metaCurrent } = payload.indexedDB;
+
+            await new Promise((resolve, reject) => {
+                const transaction = db.transaction([PROJECTS_STORE, META_STORE], 'readwrite');
+                const projectsStore = transaction.objectStore(PROJECTS_STORE);
+                const metaStore = transaction.objectStore(META_STORE);
+
+                // Clear existing data
+                projectsStore.clear();
+                metaStore.clear();
+
+                // Write imported projects
+                (projectRows || []).forEach(row => projectsStore.put(row));
+
+                // Write imported meta
+                if (metaProjects) metaStore.put(metaProjects);
+                if (metaCurrent) metaStore.put(metaCurrent);
+
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error);
+            });
+
+            // Restore localStorage
+            Object.entries(payload.localStorage || {}).forEach(([key, value]) => {
+                localStorage.setItem(key, value);
+            });
+
+            await showAppAlert('Import successful! The page will now reload.', 'info');
+            window.location.reload();
+        } catch (e) {
+            console.error('Import failed:', e);
+            await showAppAlert('Import failed: ' + e.message, 'error');
+        }
+    };
+
+    input.click();
+}
+
 // Migrate 3D positions from old formula to new formula
 // Old: xOffset = ((x-50)/50)*2, yOffset = -((y-50)/50)*3
 // New: xOffset = ((x-50)/50)*(1-scale)*0.9, yOffset = -((y-50)/50)*(1-scale)*2
@@ -3739,6 +3871,9 @@ function setupEventListeners() {
             `Are you sure you want to delete "${project ? project.name : 'this project'}"? This cannot be undone.`;
         document.getElementById('delete-project-modal').classList.add('visible');
     });
+
+    document.getElementById('export-data-btn').addEventListener('click', () => exportAllData());
+    document.getElementById('import-data-btn').addEventListener('click', () => importAllData());
 
     // Project modal buttons
     document.getElementById('project-modal-cancel').addEventListener('click', () => {
