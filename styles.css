@@ -1249,6 +1249,12 @@ input[type="range"]::-webkit-slider-thumb {
 
 .export-format-group {
     flex-shrink: 0;
+    min-width: 90px;
+}
+
+.export-format-group .btn-group button {
+    width: auto;
+    padding: 6px 14px;
 }
 
 .export-quality-wrap {

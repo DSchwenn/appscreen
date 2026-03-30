@@ -274,6 +274,7 @@ function addPopout() {
         x: 70, y: 30,
         width: 30,
         rotation: 0, opacity: 100, cornerRadius: 12,
+        hideSource: false,
         shadow: { enabled: true, color: '#000000', blur: 30, opacity: 40, x: 0, y: 15 },
         border: { enabled: true, color: '#ffffff', width: 3, opacity: 100 }
     };
@@ -3497,6 +3498,15 @@ function updatePopoutProperties() {
     document.getElementById('popout-corner-radius').value = p.cornerRadius;
     document.getElementById('popout-corner-radius-value').textContent = formatValue(p.cornerRadius) + 'px';
 
+    // Hide source toggle
+    const hideSourceToggle = document.getElementById('popout-hide-source-toggle');
+    if (hideSourceToggle) {
+        const hidden = !!p.hideSource;
+        hideSourceToggle.classList.toggle('active', hidden);
+        const row = hideSourceToggle.closest('.toggle-row');
+        if (row) row.classList.toggle('collapsed', !hidden);
+    }
+
     // Shadow
     const shadow = p.shadow || { enabled: false, color: '#000000', blur: 30, opacity: 40, x: 0, y: 15 };
     document.getElementById('popout-shadow-toggle').classList.toggle('active', shadow.enabled);
@@ -3809,6 +3819,18 @@ function setupPopoutEventListeners() {
     bindPopoutSlider('popout-rotation', 'rotation', '°');
     bindPopoutSlider('popout-opacity', 'opacity', '%');
     bindPopoutSlider('popout-corner-radius', 'cornerRadius', 'px');
+
+    // Hide source toggle
+    const hideSourceToggle = document.getElementById('popout-hide-source-toggle');
+    if (hideSourceToggle) {
+        hideSourceToggle.addEventListener('click', () => {
+            const p = getSelectedPopout();
+            if (!p) return;
+            p.hideSource = !p.hideSource;
+            updatePopoutProperties();
+            updateCanvas();
+        });
+    }
 
     // Shadow toggle
     const shadowToggle = document.getElementById('popout-shadow-toggle');
@@ -7105,13 +7127,15 @@ function updateCanvas() {
         const img = screenshot ? getScreenshotImage(screenshot) : null;
         const ss = getScreenshotSettings();
         const use3D = ss.use3D || false;
+        const ss2 = screenshot;
+        const anyHideSource = (ss2.popouts || []).some(p => p.hideSource);
         if (use3D && img && typeof renderThreeJSToCanvas === 'function' && phoneModelLoaded) {
             // In 3D mode, update the screen texture and render the phone model
-            if (typeof updateScreenTexture === 'function') {
-                updateScreenTexture();
+            if (!anyHideSource) {
+                if (typeof updateScreenTexture === 'function') updateScreenTexture();
+                renderThreeJSToCanvas(canvas, dims.width, dims.height);
             }
-            renderThreeJSToCanvas(canvas, dims.width, dims.height);
-        } else if (!use3D) {
+        } else if (!use3D && !anyHideSource) {
             // In 2D mode, draw the screenshot normally
             drawScreenshot();
         }
@@ -7355,10 +7379,11 @@ function renderScreenshotToCanvas(index, targetCanvas, targetCtx, dims, previewS
     const use3D = settings.use3D || false;
 
     if (img) {
+        const anyHideSource = (screenshot.popouts || []).some(p => p.hideSource);
         if (use3D && typeof renderThreeJSForScreenshot === 'function' && phoneModelLoaded) {
             // Render 3D phone model for this specific screenshot
-            renderThreeJSForScreenshot(targetCanvas, dims.width, dims.height, index);
-        } else {
+            if (!anyHideSource) renderThreeJSForScreenshot(targetCanvas, dims.width, dims.height, index);
+        } else if (!anyHideSource) {
             // Draw 2D screenshot using localized image
             drawScreenshotToContext(targetCtx, dims, img, settings);
         }
