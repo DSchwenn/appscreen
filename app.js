@@ -530,6 +530,74 @@ function moveElementLayer(id, direction) {
     updateElementsList();
 }
 
+function duplicateElement(id) {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot || !screenshot.elements) return;
+    const idx = screenshot.elements.findIndex(e => e.id === id);
+    if (idx === -1) return;
+
+    const source = screenshot.elements[idx];
+    const clone = JSON.parse(JSON.stringify({ ...source, image: undefined }));
+    clone.id = crypto.randomUUID();
+
+    // Small offset so the duplicate is immediately visible/selectable.
+    clone.x = Math.max(0, Math.min(100, (source.x ?? 50) + 2));
+    clone.y = Math.max(0, Math.min(100, (source.y ?? 50) + 2));
+
+    // Rebuild runtime image object depending on element type.
+    if (clone.type === 'graphic') {
+        if (clone.svgRaw) {
+            updateGraphicSVGColor(clone);
+        } else {
+            const src = clone.src || source.image?.src;
+            if (src) {
+                const img = new Image();
+                img.onload = () => {
+                    clone.image = img;
+                    updateCanvas();
+                    updateElementsList();
+                };
+                img.src = src;
+                clone.image = img;
+            }
+        }
+    } else if (clone.type === 'icon') {
+        if (clone.iconName) {
+            getLucideImage(clone.iconName, clone.iconColor || '#ffffff', clone.iconStrokeWidth || 2)
+                .then(img => {
+                    clone.image = img;
+                    updateCanvas();
+                    updateElementsList();
+                })
+                .catch(e => console.error('Failed to duplicate icon:', e));
+        } else if (source.image?.src) {
+            const img = new Image();
+            img.onload = () => {
+                clone.image = img;
+                updateCanvas();
+                updateElementsList();
+            };
+            img.src = source.image.src;
+            clone.image = img;
+        }
+    } else if (source.image?.src) {
+        const img = new Image();
+        img.onload = () => {
+            clone.image = img;
+            updateCanvas();
+            updateElementsList();
+        };
+        img.src = source.image.src;
+        clone.image = img;
+    }
+
+    screenshot.elements.splice(idx + 1, 0, clone);
+    selectedElementId = clone.id;
+    updateCanvas();
+    updateElementsList();
+    updateElementProperties();
+}
+
 // Add reset buttons to all slider control rows
 function setupSliderResetButtons() {
     document.querySelectorAll('.control-row input[type="range"]').forEach(slider => {
@@ -2627,6 +2695,12 @@ function updateElementsList() {
                         <polyline points="6 9 12 15 18 9"/>
                     </svg>
                 </button>
+                <button class="element-item-btn" data-action="duplicate" title="Duplicate">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                </button>
                 <button class="element-item-btn danger" data-action="delete" title="Delete">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 6L6 18M6 6l12 12"/>
@@ -2651,6 +2725,7 @@ function updateElementsList() {
                 if (action === 'delete') deleteElement(el.id);
                 else if (action === 'move-up') moveElementLayer(el.id, 'up');
                 else if (action === 'move-down') moveElementLayer(el.id, 'down');
+                else if (action === 'duplicate') duplicateElement(el.id);
             });
         });
 
