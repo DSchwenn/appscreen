@@ -355,6 +355,17 @@ html.tauri-app .right-sidebar {
     margin-top: 2px;
 }
 
+.screenshot-profile-badge {
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 500;
+}
+
 /* Screenshot item menu */
 .screenshot-menu-wrapper {
     position: relative;
@@ -426,6 +437,19 @@ html.tauri-app .right-sidebar {
 .screenshot-menu-item svg {
     flex-shrink: 0;
     opacity: 0.7;
+}
+
+.screenshot-menu-profile-info {
+    padding: 7px 10px;
+    margin: 2px 2px 4px 2px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Transfer mode styles */
@@ -1052,6 +1076,70 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     gap: 8px;
     align-items: stretch;
+}
+
+.layout-profile-row {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.layout-profile-status {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: visible;
+}
+
+/* Hover tooltip for layout profile status and reset button */
+.lp-tooltip-anchor {
+    position: relative;
+}
+.lp-tooltip-anchor[data-tooltip]::after {
+    content: attr(data-tooltip);
+    display: block;
+    position: absolute;
+    bottom: calc(100% + 7px);
+    left: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 6px 10px;
+    border-radius: 7px;
+    white-space: pre;
+    z-index: 600;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    min-width: 140px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.lp-tooltip-anchor[data-tooltip]:hover::after {
+    opacity: 1;
+}
+
+.layout-profile-reset-btn {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.layout-profile-reset-btn:hover:not(:disabled) {
+    border-color: var(--text-secondary);
+}
+
+.layout-profile-reset-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .output-size-dropdown {

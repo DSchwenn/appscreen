@@ -293,6 +293,10 @@
                             </svg>
                         </button>
                     </div>
+                    <div class="layout-profile-row">
+                        <span class="layout-profile-status lp-tooltip-anchor" id="layout-profile-status">Layout profile: iPhone 6.9"</span>
+                        <button class="layout-profile-reset-btn lp-tooltip-anchor" id="layout-profile-reset-btn">Reset From...</button>
+                    </div>
                     <div class="export-format-row">
                         <div class="btn-group export-format-group" id="export-format-selector">
                             <button class="active" data-format="png">PNG</button>
@@ -1752,6 +1756,28 @@
             <div class="modal-buttons">
                 <button class="modal-btn modal-btn-cancel" id="apply-style-cancel">Cancel</button>
                 <button class="modal-btn modal-btn-confirm" id="apply-style-confirm" style="background: var(--accent);">Apply to All</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Layout Profile Modal -->
+    <div class="modal-overlay" id="layout-profile-reset-modal">
+        <div class="modal">
+            <div class="modal-icon" style="background: rgba(10, 132, 255, 0.2);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--accent);">
+                    <path d="M3 12a9 9 0 1 1 3 6.75"/>
+                    <polyline points="3 16 3 10 9 10"/>
+                </svg>
+            </div>
+            <h3 class="modal-title">Reset Device Layout</h3>
+            <p class="modal-message">Overwrite the current layout profile (<span id="layout-profile-reset-target">Current</span>) by copying settings from another existing device profile.</p>
+            <div class="control-group" style="margin-top: 16px; text-align: left;">
+                <label class="control-label">Copy From Device</label>
+                <select id="layout-profile-source-select"></select>
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" id="layout-profile-reset-cancel">Cancel</button>
+                <button class="modal-btn modal-btn-confirm" id="layout-profile-reset-confirm" style="background: var(--accent);">Reset Layout</button>
             </div>
         </div>
     </div>

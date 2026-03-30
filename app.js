@@ -103,6 +103,7 @@ const baseTextDefaults = JSON.parse(JSON.stringify(state.defaults.text));
 let selectedElementId = null;
 let selectedPopoutId = null;
 let draggingElement = null;
+let isApplyingLayoutProfile = false;
 
 // Preload laurel SVG images for element frames
 const laurelImages = {};
@@ -116,6 +117,225 @@ const laurelImages = {};
 function getCurrentScreenshot() {
     if (state.screenshots.length === 0) return null;
     return state.screenshots[state.selectedIndex];
+}
+
+// ===== Layout Profiles: State Helpers =====
+function getOutputDeviceProfileKey(device = state.outputDevice, customWidth = state.customWidth, customHeight = state.customHeight) {
+    if (device === 'custom') return `custom:${customWidth}x${customHeight}`;
+    return device;
+}
+
+function getOutputDeviceLabelForKey(key) {
+    if (!key) return 'Unknown';
+    if (key.startsWith('custom:')) {
+        const dims = key.slice('custom:'.length).replace('x', ' × ');
+        return `Custom (${dims})`;
+    }
+    const option = document.querySelector(`.output-size-menu .device-option[data-device="${key}"]`);
+    if (option) return option.querySelector('.device-option-name')?.textContent || key;
+    return key;
+}
+
+function ensureLayoutProfiles(screenshot) {
+    if (!screenshot.layoutProfiles) screenshot.layoutProfiles = {};
+    return screenshot.layoutProfiles;
+}
+
+function deepClone(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function serializeBackgroundForProfile(background) {
+    const cloned = deepClone({ ...background, image: null });
+    cloned.imageSrc = background?.image?.src || '';
+    return cloned;
+}
+
+function hydrateBackgroundFromProfile(profileBackground) {
+    const bg = deepClone(profileBackground || {});
+    const imageSrc = bg.imageSrc || '';
+    delete bg.imageSrc;
+    bg.image = null;
+    if (imageSrc) {
+        const img = new Image();
+        img.onload = () => updateCanvas();
+        img.src = imageSrc;
+        bg.image = img;
+    }
+    return bg;
+}
+
+function captureCurrentLayoutToProfile(screenshot, profileKey) {
+    if (!screenshot || !profileKey) return;
+    const profiles = ensureLayoutProfiles(screenshot);
+    profiles[profileKey] = {
+        background: serializeBackgroundForProfile(screenshot.background),
+        screenshot: deepClone(screenshot.screenshot),
+        text: deepClone(screenshot.text),
+        elements: (screenshot.elements || []).map(el => ({
+            ...deepClone(el),
+            image: undefined
+        })),
+        popouts: deepClone(screenshot.popouts || [])
+    };
+}
+
+function applyLayoutProfileToScreenshot(screenshot, profileKey) {
+    if (!screenshot || !profileKey) return false;
+    const profile = screenshot.layoutProfiles?.[profileKey];
+    if (!profile) return false;
+    screenshot.background = hydrateBackgroundFromProfile(profile.background);
+    screenshot.screenshot = deepClone(profile.screenshot);
+    screenshot.text = normalizeTextSettings(deepClone(profile.text));
+    if (profile.elements) {
+        screenshot.elements = reconstructElementImages(deepClone(profile.elements));
+    }
+    if (profile.popouts) {
+        screenshot.popouts = deepClone(profile.popouts);
+    }
+    screenshot.__activeLayoutProfileKey = profileKey;
+    return true;
+}
+
+function cloneLayoutProfile(screenshot, sourceKey, targetKey) {
+    if (!screenshot || !sourceKey || !targetKey) return false;
+    const source = screenshot.layoutProfiles?.[sourceKey];
+    if (!source) return false;
+    ensureLayoutProfiles(screenshot)[targetKey] = deepClone(source);
+    return true;
+}
+
+function ensureAndApplyActiveLayoutProfileForCurrentScreenshot() {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot || isApplyingLayoutProfile) return;
+    const key = getOutputDeviceProfileKey();
+    const profiles = ensureLayoutProfiles(screenshot);
+    if (!profiles[key]) {
+        // First visit: snapshot current settings for this output profile.
+        captureCurrentLayoutToProfile(screenshot, key);
+    }
+    if (screenshot.__activeLayoutProfileKey === key) return;
+    isApplyingLayoutProfile = true;
+    applyLayoutProfileToScreenshot(screenshot, key);
+    isApplyingLayoutProfile = false;
+}
+
+function syncActiveLayoutProfileFromCurrentScreenshot() {
+    if (isApplyingLayoutProfile) return;
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot) return;
+    captureCurrentLayoutToProfile(screenshot, getOutputDeviceProfileKey());
+}
+
+function switchOutputDeviceWithProfiles(newDevice, newCustomWidth = state.customWidth, newCustomHeight = state.customHeight) {
+    const screenshot = getCurrentScreenshot();
+    const prevDevice = state.outputDevice;
+    const prevCustomWidth = state.customWidth;
+    const prevCustomHeight = state.customHeight;
+    const prevKey = getOutputDeviceProfileKey(prevDevice, prevCustomWidth, prevCustomHeight);
+
+    if (screenshot) {
+        captureCurrentLayoutToProfile(screenshot, prevKey);
+    }
+
+    state.outputDevice = newDevice;
+    if (newDevice === 'custom') {
+        state.customWidth = newCustomWidth;
+        state.customHeight = newCustomHeight;
+    }
+
+    const nextKey = getOutputDeviceProfileKey(newDevice, state.customWidth, state.customHeight);
+    if (screenshot) {
+        const profiles = ensureLayoutProfiles(screenshot);
+        if (!profiles[nextKey]) {
+            // Brand-new profile: clone everything from previous device as starting point.
+            if (!cloneLayoutProfile(screenshot, prevKey, nextKey)) {
+                captureCurrentLayoutToProfile(screenshot, nextKey);
+            }
+        } else if (profiles[nextKey].elements === undefined || profiles[nextKey].popouts === undefined) {
+            // One-time migration: profile was saved before elements/popouts were tracked per-device.
+            // Backfill from the previous device's profile so live elements don't bleed across.
+            const srcProfile = profiles[prevKey];
+            if (profiles[nextKey].elements === undefined) {
+                profiles[nextKey].elements = srcProfile?.elements !== undefined
+                    ? deepClone(srcProfile.elements)
+                    : [];
+            }
+            if (profiles[nextKey].popouts === undefined) {
+                profiles[nextKey].popouts = srcProfile?.popouts !== undefined
+                    ? deepClone(srcProfile.popouts)
+                    : [];
+            }
+        }
+        isApplyingLayoutProfile = true;
+        applyLayoutProfileToScreenshot(screenshot, nextKey);
+        isApplyingLayoutProfile = false;
+    }
+
+    syncUIWithState();
+    updateGradientStopsUI();
+    const ss = getScreenshotSettings();
+    if (ss.use3D && typeof updateScreenTexture === 'function') {
+        updateScreenTexture();
+    }
+    updateCanvas();
+}
+
+function getLayoutProfileKeysForCurrentScreenshot() {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot?.layoutProfiles) return [];
+    return Object.keys(screenshot.layoutProfiles);
+}
+
+function escapeHtmlAttr(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function getLayoutProfileInspectorInfo(screenshot, maxVisible = 2) {
+    const keys = Object.keys(screenshot?.layoutProfiles || {});
+    if (keys.length === 0) {
+        return { count: 0, short: 'none', full: 'none' };
+    }
+    const labels = keys.map(getOutputDeviceLabelForKey);
+    const short = labels.length <= maxVisible
+        ? labels.join(', ')
+        : `${labels.slice(0, maxVisible).join(', ')} +${labels.length - maxVisible}`;
+    return { count: labels.length, short, full: labels.join(', ') };
+}
+
+function updateLayoutProfileUI() {
+    const statusEl = document.getElementById('layout-profile-status');
+    const resetBtn = document.getElementById('layout-profile-reset-btn');
+    if (!statusEl || !resetBtn) return;
+
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot) {
+        statusEl.textContent = 'No screenshot selected';
+        resetBtn.disabled = true;
+        return;
+    }
+
+    const currentKey = getOutputDeviceProfileKey();
+    const profiles = ensureLayoutProfiles(screenshot);
+    const hasCurrent = !!profiles[currentKey];
+    const labels = Object.keys(profiles).map(getOutputDeviceLabelForKey);
+    const tooltipText = labels.length === 0
+        ? 'No saved profiles yet'
+        : 'Existing profiles:\n' + labels.map(l => '• ' + l).join('\n');
+    const profileCount = labels.length;
+    const countLabel = profileCount === 0 ? '' : ` · ${profileCount} profile${profileCount > 1 ? 's' : ''}`;
+    statusEl.textContent = `Layout: ${getOutputDeviceLabelForKey(currentKey)}${hasCurrent ? '' : ' (new)'}${countLabel}`;
+    statusEl.dataset.tooltip = tooltipText;
+
+    const otherProfiles = Object.keys(profiles).filter(k => k !== currentKey);
+    resetBtn.disabled = otherProfiles.length === 0;
+    resetBtn.dataset.tooltip = otherProfiles.length === 0
+        ? 'No other profiles to reset from'
+        : tooltipText;
 }
 
 function getBackground() {
@@ -1604,13 +1824,14 @@ function saveState() {
                 image: undefined // Don't serialize Image objects
             })),
             popouts: s.popouts || [],
-            overrides: s.overrides
+            overrides: s.overrides,
+            layoutProfiles: s.layoutProfiles || {}
         };
     });
 
     const stateToSave = {
         id: currentProjectId,
-        formatVersion: 2, // Version 2: new 3D positioning formula
+        formatVersion: 3, // Version 3: layout profiles by output device
         screenshots: screenshotsToSave,
         selectedIndex: state.selectedIndex,
         outputDevice: state.outputDevice,
@@ -1857,6 +2078,14 @@ function loadState() {
             request.onsuccess = () => {
                 const parsed = request.result;
                 if (parsed) {
+                    // Restore global UI state early so sync/render uses the correct output profile while loading.
+                    state.selectedIndex = parsed.selectedIndex || 0;
+                    state.outputDevice = parsed.outputDevice || 'iphone-6.9';
+                    state.customWidth = parsed.customWidth || 1320;
+                    state.customHeight = parsed.customHeight || 2868;
+                    state.currentLanguage = parsed.currentLanguage || 'en';
+                    state.projectLanguages = parsed.projectLanguages || ['en'];
+
                     // Check if this is an old-style project (no per-screenshot settings)
                     const isOldFormat = !parsed.defaults && (parsed.background || parsed.screenshot || parsed.text);
                     const hasScreenshotsWithoutSettings = parsed.screenshots?.some(s => !s.background && !s.screenshot && !s.text);
@@ -1920,7 +2149,8 @@ function loadState() {
                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                     elements: reconstructElementImages(s.elements),
                                     popouts: s.popouts || [],
-                                    overrides: s.overrides || {}
+                                    overrides: s.overrides || {},
+                                    layoutProfiles: s.layoutProfiles || {}
                                 };
                                 loadedCount++;
                                 checkAllLoaded();
@@ -1959,7 +2189,8 @@ function loadState() {
                                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                                     elements: reconstructElementImages(s.elements),
                                                     popouts: s.popouts || [],
-                                                    overrides: s.overrides || {}
+                                                    overrides: s.overrides || {},
+                                                    layoutProfiles: s.layoutProfiles || {}
                                                 };
                                                 loadedCount++;
                                                 checkAllLoaded();
@@ -2004,7 +2235,8 @@ function loadState() {
                                         text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                         elements: reconstructElementImages(s.elements),
                                         popouts: s.popouts || [],
-                                        overrides: s.overrides || {}
+                                        overrides: s.overrides || {},
+                                        layoutProfiles: s.layoutProfiles || {}
                                     };
                                     loadedCount++;
                                     checkAllLoaded();
@@ -2445,6 +2677,9 @@ function syncUIWithState() {
     // Update language button
     updateLanguageButton();
 
+    // Ensure current screenshot is showing layout for active output profile.
+    ensureAndApplyActiveLayoutProfileForCurrentScreenshot();
+
     // Device selector dropdown
     document.querySelectorAll('.output-size-menu .device-option').forEach(opt => {
         opt.classList.toggle('selected', opt.dataset.device === state.outputDevice);
@@ -2466,6 +2701,7 @@ function syncUIWithState() {
     customInputs.classList.toggle('visible', state.outputDevice === 'custom');
     document.getElementById('custom-width').value = state.customWidth;
     document.getElementById('custom-height').value = state.customHeight;
+    updateLayoutProfileUI();
 
     // Get current screenshot's settings
     const bg = getBackground();
@@ -2668,7 +2904,9 @@ function updateElementsList() {
 
         let thumbContent;
         if (el.type === 'graphic' && el.image) {
-            thumbContent = `<img src="${el.image.src}" alt="${el.name}">`;
+            // Avoid blob URL errors for SVG overrides by preferring stable source URLs in list thumbnails.
+            const thumbSrc = (typeof el.src === 'string' && el.src) ? el.src : el.image.src;
+            thumbContent = `<img src="${thumbSrc}" alt="${el.name}">`;
         } else if (el.type === 'emoji') {
             thumbContent = `<span class="emoji-thumb">${el.emoji}</span>`;
         } else if (el.type === 'icon' && el.image) {
@@ -4936,35 +5174,82 @@ function setupEventListeners() {
             e.stopPropagation();
             document.querySelectorAll('.output-size-menu .device-option').forEach(o => o.classList.remove('selected'));
             opt.classList.add('selected');
-            state.outputDevice = opt.dataset.device;
-
-            // Update trigger text
-            document.getElementById('output-size-name').textContent = opt.querySelector('.device-option-name').textContent;
-            document.getElementById('output-size-dims').textContent = opt.querySelector('.device-option-size').textContent;
+            const newDevice = opt.dataset.device;
+            switchOutputDeviceWithProfiles(newDevice, state.customWidth, state.customHeight);
 
             // Show/hide custom inputs
             const customInputs = document.getElementById('custom-size-inputs');
-            if (state.outputDevice === 'custom') {
+            if (newDevice === 'custom') {
                 customInputs.classList.add('visible');
             } else {
                 customInputs.classList.remove('visible');
                 outputDropdown.classList.remove('open');
             }
-            updateCanvas();
         });
     });
 
     // Custom size inputs
     document.getElementById('custom-width').addEventListener('input', (e) => {
-        state.customWidth = parseInt(e.target.value) || 1290;
-        document.getElementById('output-size-dims').textContent = `${state.customWidth} × ${state.customHeight}`;
-        updateCanvas();
+        const nextWidth = parseInt(e.target.value) || 1290;
+        switchOutputDeviceWithProfiles('custom', nextWidth, state.customHeight);
     });
     document.getElementById('custom-height').addEventListener('input', (e) => {
-        state.customHeight = parseInt(e.target.value) || 2796;
-        document.getElementById('output-size-dims').textContent = `${state.customWidth} × ${state.customHeight}`;
-        updateCanvas();
+        const nextHeight = parseInt(e.target.value) || 2796;
+        switchOutputDeviceWithProfiles('custom', state.customWidth, nextHeight);
     });
+
+    // Layout profile reset modal
+    const resetBtn = document.getElementById('layout-profile-reset-btn');
+    const resetModal = document.getElementById('layout-profile-reset-modal');
+    const resetSelect = document.getElementById('layout-profile-source-select');
+    const resetCancel = document.getElementById('layout-profile-reset-cancel');
+    const resetConfirm = document.getElementById('layout-profile-reset-confirm');
+    const resetTargetLabel = document.getElementById('layout-profile-reset-target');
+
+    if (resetBtn && resetModal && resetSelect && resetCancel && resetConfirm && resetTargetLabel) {
+        resetBtn.addEventListener('click', () => {
+            const screenshot = getCurrentScreenshot();
+            if (!screenshot) return;
+            const currentKey = getOutputDeviceProfileKey();
+            const keys = getLayoutProfileKeysForCurrentScreenshot().filter(k => k !== currentKey);
+            resetSelect.innerHTML = '';
+            keys.forEach(key => {
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = getOutputDeviceLabelForKey(key);
+                resetSelect.appendChild(option);
+            });
+            resetTargetLabel.textContent = getOutputDeviceLabelForKey(currentKey);
+            resetConfirm.disabled = keys.length === 0;
+            resetModal.classList.add('visible');
+        });
+
+        resetCancel.addEventListener('click', () => {
+            resetModal.classList.remove('visible');
+        });
+
+        resetConfirm.addEventListener('click', () => {
+            const screenshot = getCurrentScreenshot();
+            if (!screenshot) return;
+            const sourceKey = resetSelect.value;
+            const targetKey = getOutputDeviceProfileKey();
+            if (!sourceKey || sourceKey === targetKey) return;
+            if (!cloneLayoutProfile(screenshot, sourceKey, targetKey)) return;
+            isApplyingLayoutProfile = true;
+            applyLayoutProfileToScreenshot(screenshot, targetKey);
+            isApplyingLayoutProfile = false;
+            resetModal.classList.remove('visible');
+            syncUIWithState();
+            updateGradientStopsUI();
+            updateCanvas();
+        });
+
+        resetModal.addEventListener('click', (e) => {
+            if (e.target.id === 'layout-profile-reset-modal') {
+                resetModal.classList.remove('visible');
+            }
+        });
+    }
 
     // Tabs
     document.querySelectorAll('.tab').forEach(tab => {
@@ -7072,7 +7357,8 @@ function createNewScreenshot(img, src, name, lang, deviceType) {
         elements: JSON.parse(JSON.stringify(state.defaults.elements || [])),
         popouts: [],
         // Legacy overrides for backwards compatibility
-        overrides: {}
+        overrides: {},
+        layoutProfiles: {}
     });
 
     updateScreenshotList();
@@ -7113,6 +7399,11 @@ function updateScreenshotList() {
         const item = document.createElement('div');
         const isTransferTarget = state.transferTarget === index;
         const isTransferMode = state.transferTarget !== null;
+        const profileInfo = getLayoutProfileInspectorInfo(screenshot);
+        const profileTitle = escapeHtmlAttr(profileInfo.full);
+        const profileBadgeHtml = profileInfo.count > 0
+            ? `<span class="screenshot-profile-badge" title="${profileTitle}">${profileInfo.count} layout${profileInfo.count === 1 ? '' : 's'}</span>`
+            : '';
         item.className = 'screenshot-item' +
             (index === state.selectedIndex ? ' selected' : '') +
             (isTransferTarget ? ' transfer-target' : '') +
@@ -7135,6 +7426,7 @@ function updateScreenshotList() {
                     </svg>
                 </button>
                 <div class="screenshot-menu" data-index="${index}">
+                    <div class="screenshot-menu-profile-info" title="${profileTitle}">Layouts: ${profileInfo.short}</div>
                     <button class="screenshot-menu-item screenshot-translations" data-index="${index}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2v3M22 22l-5-10-5 10M14 18h6"/>
@@ -7215,7 +7507,7 @@ function updateScreenshotList() {
             ${thumbHtml}
             <div class="screenshot-info">
                 <div class="screenshot-name">${screenshot.name}</div>
-                <div class="screenshot-device">${isTransferTarget ? 'Click source to copy style' : screenshot.deviceType}${langFlagsHtml}</div>
+                <div class="screenshot-device">${isTransferTarget ? 'Click source to copy style' : screenshot.deviceType}${langFlagsHtml}${profileBadgeHtml}</div>
             </div>
             ${buttonsHtml}
         `;
@@ -7481,6 +7773,9 @@ function transferStyle(sourceIndex, targetIndex) {
 
     // Explicitly skip popouts — crop regions are specific to each screenshot's source image
 
+    // Keep active output profile in sync after style transfer.
+    captureCurrentLayoutToProfile(target, getOutputDeviceProfileKey());
+
     // Reset transfer mode
     state.transferTarget = null;
 
@@ -7541,6 +7836,7 @@ function applyStyleToAll() {
         });
 
         // Explicitly skip popouts — crop regions are specific to each screenshot's source image
+        captureCurrentLayoutToProfile(target, getOutputDeviceProfileKey());
     });
 
     applyStyleSourceIndex = null;
@@ -7667,6 +7963,7 @@ function getCanvasDimensions() {
 }
 
 function updateCanvas() {
+    syncActiveLayoutProfileFromCurrentScreenshot();
     saveState(); // Persist state on every update
     const dims = getCanvasDimensions();
     canvas.width = dims.width;
