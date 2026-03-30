@@ -4791,6 +4791,23 @@ function setupEventListeners() {
     document.getElementById('export-current').addEventListener('click', exportCurrent);
     document.getElementById('export-all').addEventListener('click', exportAll);
 
+    // Export format selector (PNG / JPG)
+    document.querySelectorAll('#export-format-selector button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#export-format-selector button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const isJpg = btn.dataset.format === 'jpg';
+            document.getElementById('export-quality-wrap').style.display = isJpg ? 'flex' : 'none';
+        });
+    });
+
+    // Export quality slider
+    const exportQualitySlider = document.getElementById('export-quality');
+    const exportQualityValue = document.getElementById('export-quality-value');
+    exportQualitySlider.addEventListener('input', () => {
+        exportQualityValue.textContent = exportQualitySlider.value + '%';
+    });
+
     // Position presets
     document.querySelectorAll('.position-preset').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -8261,6 +8278,14 @@ function hexToRgba(hex, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function getExportSettings() {
+    const activeBtn = document.querySelector('#export-format-selector button.active');
+    const format = activeBtn ? activeBtn.dataset.format : 'png';
+    const mimeType = format === 'jpg' ? 'image/jpeg' : 'image/png';
+    const quality = format === 'jpg' ? parseInt(document.getElementById('export-quality').value, 10) / 100 : undefined;
+    return { format, mimeType, quality };
+}
+
 async function exportCurrent() {
     if (state.screenshots.length === 0) {
         await showAppAlert('Please upload a screenshot first', 'info');
@@ -8270,9 +8295,10 @@ async function exportCurrent() {
     // Ensure canvas is up-to-date (especially important for 3D mode)
     updateCanvas();
 
+    const { format, mimeType, quality } = getExportSettings();
     const link = document.createElement('a');
-    link.download = `screenshot-${state.selectedIndex + 1}.png`;
-    link.href = canvas.toDataURL('image/png');
+    link.download = `screenshot-${state.selectedIndex + 1}.${format}`;
+    link.href = canvas.toDataURL(mimeType, quality);
     link.click();
 }
 
@@ -8354,10 +8380,11 @@ async function exportAllForLanguage(lang) {
         await new Promise(resolve => setTimeout(resolve, 100));
 
         // Get canvas data as base64, strip the data URL prefix
-        const dataUrl = canvas.toDataURL('image/png');
-        const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+        const { format, mimeType, quality } = getExportSettings();
+        const dataUrl = canvas.toDataURL(mimeType, quality);
+        const base64Data = dataUrl.replace(/^data:[^;]+;base64,/, '');
 
-        zip.file(`screenshot-${i + 1}.png`, base64Data, { base64: true });
+        zip.file(`screenshot-${i + 1}.${format}`, base64Data, { base64: true });
     }
 
     // Restore original settings
@@ -8426,11 +8453,12 @@ async function exportAllLanguages() {
             await new Promise(resolve => setTimeout(resolve, 100));
 
             // Get canvas data as base64, strip the data URL prefix
-            const dataUrl = canvas.toDataURL('image/png');
-            const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+            const { format, mimeType, quality } = getExportSettings();
+            const dataUrl = canvas.toDataURL(mimeType, quality);
+            const base64Data = dataUrl.replace(/^data:[^;]+;base64,/, '');
 
             // Use language code as folder name
-            zip.file(`${lang}/screenshot-${i + 1}.png`, base64Data, { base64: true });
+            zip.file(`${lang}/screenshot-${i + 1}.${format}`, base64Data, { base64: true });
         }
     }
 

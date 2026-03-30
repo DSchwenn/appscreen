@@ -293,6 +293,16 @@
                             </svg>
                         </button>
                     </div>
+                    <div class="export-format-row">
+                        <div class="btn-group export-format-group" id="export-format-selector">
+                            <button class="active" data-format="png">PNG</button>
+                            <button data-format="jpg">JPG</button>
+                        </div>
+                        <div class="export-quality-wrap" id="export-quality-wrap" style="display: none;">
+                            <input type="range" id="export-quality" min="10" max="100" value="92">
+                            <span class="range-value" id="export-quality-value">92%</span>
+                        </div>
+                    </div>
                     <button class="export-btn export-all-btn" id="export-all" title="Export all screenshots as ZIP">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
