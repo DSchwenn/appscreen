@@ -2222,14 +2222,8 @@ function duplicateScreenshot(index) {
     const original = state.screenshots[index];
     if (!original) return;
 
-    const clone = JSON.parse(JSON.stringify({
-        name: original.name,
-        deviceType: original.deviceType,
-        background: original.background,
-        screenshot: original.screenshot,
-        text: original.text,
-        overrides: original.overrides
-    }));
+    // Deep-clone the full screenshot data (elements, popouts, text, settings, overrides)
+    const clone = JSON.parse(JSON.stringify(original));
 
     const nameParts = clone.name.split('.');
     if (nameParts.length > 1) {
@@ -2239,6 +2233,7 @@ function duplicateScreenshot(index) {
         clone.name = clone.name + ' (Copy)';
     }
 
+    // Rehydrate localized screenshot images
     clone.localizedImages = {};
     if (original.localizedImages) {
         Object.keys(original.localizedImages).forEach(lang => {
@@ -2255,10 +2250,78 @@ function duplicateScreenshot(index) {
         });
     }
 
+    // Rehydrate primary screenshot image
     if (original.image?.src) {
         const img = new Image();
         img.src = original.image.src;
         clone.image = img;
+    }
+
+    // Rehydrate background image
+    if (original.background?.image?.src) {
+        const bgImg = new Image();
+        bgImg.src = original.background.image.src;
+        clone.background.image = bgImg;
+    }
+
+    // Rehydrate graphic/icon element images
+    if (Array.isArray(clone.elements) && Array.isArray(original.elements)) {
+        clone.elements.forEach((clonedEl, i) => {
+            const sourceEl = original.elements[i];
+            if (!sourceEl) return;
+
+            if (clonedEl.type === 'graphic') {
+                // SVG graphics need regeneration (including color override) and a redraw on load.
+                if (clonedEl.svgRaw) {
+                    updateGraphicSVGColor(clonedEl);
+                } else {
+                    const src = clonedEl.src || sourceEl.src || sourceEl.image?.src;
+                    if (src) {
+                        const elImg = new Image();
+                        elImg.onload = () => {
+                            clonedEl.image = elImg;
+                            updateCanvas();
+                        };
+                        elImg.src = src;
+                        clonedEl.image = elImg;
+                    }
+                }
+            } else if (clonedEl.type === 'icon') {
+                // Rebuild icon from source SVG so it is guaranteed to render after duplication.
+                if (clonedEl.iconName) {
+                    getLucideImage(
+                        clonedEl.iconName,
+                        clonedEl.iconColor || '#ffffff',
+                        clonedEl.iconStrokeWidth || 2
+                    )
+                        .then(img => {
+                            clonedEl.image = img;
+                            updateCanvas();
+                        })
+                        .catch(e => console.error('Failed to reconstruct duplicated icon:', e));
+                } else if (sourceEl.image?.src) {
+                    const elImg = new Image();
+                    elImg.onload = () => {
+                        clonedEl.image = elImg;
+                        updateCanvas();
+                    };
+                    elImg.src = sourceEl.image.src;
+                    clonedEl.image = elImg;
+                }
+            }
+
+            // Backward compatibility for older graphic elements
+            if (clonedEl.type === 'graphic') {
+                if (clonedEl.cropEnabled === undefined) clonedEl.cropEnabled = false;
+                if (clonedEl.cropX === undefined) clonedEl.cropX = 0;
+                if (clonedEl.cropY === undefined) clonedEl.cropY = 0;
+                if (clonedEl.cropWidth === undefined) clonedEl.cropWidth = 100;
+                if (clonedEl.cropHeight === undefined) clonedEl.cropHeight = 100;
+                if (clonedEl.cornerRadius === undefined) clonedEl.cornerRadius = 0;
+                if (!clonedEl.shadow) clonedEl.shadow = { enabled: false, color: '#000000', blur: 20, opacity: 40, x: 0, y: 10 };
+                if (!clonedEl.border) clonedEl.border = { enabled: false, color: '#ffffff', width: 3, opacity: 100 };
+            }
+        });
     }
 
     state.screenshots.splice(index + 1, 0, clone);
