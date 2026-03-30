@@ -1251,7 +1251,9 @@ const deviceDimensions = {
     'web-og': { width: 1200, height: 630 },
     'web-twitter': { width: 1200, height: 675 },
     'web-hero': { width: 1920, height: 1080 },
-    'web-feature': { width: 1024, height: 500 }
+    'web-feature': { width: 1024, height: 500 },
+    'web-insta-large': { width: 1080, height: 1440 },
+    'web-insta-small': { width: 1080, height: 566 }
 };
 
 // DOM elements
