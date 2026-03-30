@@ -338,6 +338,7 @@ function addGraphicElement(img, src, name, svgRaw = null) {
         font: "-apple-system, BlinkMacSystemFont, 'SF Pro Display'",
         fontSize: 60,
         fontWeight: '600',
+        textAlign: 'center',
         fontColor: '#ffffff',
         italic: false,
         frame: 'none',
@@ -2797,6 +2798,7 @@ function updateElementProperties() {
         document.getElementById('element-font-size').value = el.fontSize;
         document.getElementById('element-font-color').value = el.fontColor;
         document.getElementById('element-font-weight').value = el.fontWeight;
+        document.getElementById('element-text-align').value = el.textAlign || 'center';
         document.getElementById('element-italic-btn').classList.toggle('active', el.italic);
         document.getElementById('element-frame').value = el.frame || 'none';
         const frameOpts = document.getElementById('element-frame-options');
@@ -3203,6 +3205,14 @@ function setupElementEventListeners() {
     if (fontWeight) {
         fontWeight.addEventListener('change', () => {
             if (selectedElementId) setElementProperty(selectedElementId, 'fontWeight', fontWeight.value);
+        });
+    }
+
+    // Text align
+    const textAlign = document.getElementById('element-text-align');
+    if (textAlign) {
+        textAlign.addEventListener('change', () => {
+            if (selectedElementId) setElementProperty(selectedElementId, 'textAlign', textAlign.value);
         });
     }
 
@@ -8387,7 +8397,8 @@ function drawElementsToContext(context, dims, elements, layer) {
             const fontStyle = el.italic ? 'italic' : 'normal';
             context.font = `${fontStyle} ${el.fontWeight} ${el.fontSize}px ${el.font}`;
             context.fillStyle = el.fontColor;
-            context.textAlign = 'center';
+            const textAlign = (el.textAlign === 'left' || el.textAlign === 'right') ? el.textAlign : 'center';
+            context.textAlign = textAlign;
             context.textBaseline = 'middle';
 
             // Word-wrap text within element width (respects manual line breaks)
@@ -8402,8 +8413,9 @@ function drawElementsToContext(context, dims, elements, layer) {
 
             // Draw text lines
             const startY = -(totalHeight / 2) + el.fontSize / 2;
+            const textX = textAlign === 'left' ? -elWidth / 2 : (textAlign === 'right' ? elWidth / 2 : 0);
             lines.forEach((line, i) => {
-                context.fillText(line, 0, startY + i * lineHeight);
+                context.fillText(line, textX, startY + i * lineHeight);
             });
         }
 
