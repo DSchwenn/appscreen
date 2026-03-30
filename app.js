@@ -317,6 +317,8 @@ function addGraphicElement(img, src, name, svgRaw = null) {
         type: 'graphic',
         x: 50, y: 50,
         width: 20,
+        height: 20,
+        scaleLocked: true,
         rotation: 0,
         opacity: 100,
         layer: 'above-text',
@@ -426,6 +428,8 @@ function addEmojiElement(emoji, name) {
         type: 'emoji',
         x: 50, y: 50,
         width: 15,
+        height: 15,
+        scaleLocked: true,
         rotation: 0,
         opacity: 100,
         layer: 'above-text',
@@ -459,6 +463,8 @@ async function addIconElement(iconName) {
         type: 'icon',
         x: 50, y: 50,
         width: 15,
+        height: 15,
+        scaleLocked: true,
         rotation: 0,
         opacity: 100,
         layer: 'above-text',
@@ -2603,6 +2609,16 @@ function updateElementProperties() {
     document.getElementById('element-y-value').textContent = formatValue(el.y) + '%';
     document.getElementById('element-width').value = el.width;
     document.getElementById('element-width-value').textContent = formatValue(el.width) + '%';
+    const elScaleY = el.height ?? el.width;
+    document.getElementById('element-height').value = elScaleY;
+    document.getElementById('element-height-value').textContent = formatValue(elScaleY) + '%';
+    const scaleLinkBtn = document.getElementById('element-scale-link');
+    if (scaleLinkBtn) {
+        const locked = el.scaleLocked !== false;
+        scaleLinkBtn.classList.toggle('active', locked);
+        scaleLinkBtn.querySelector('.scale-link-icon-linked').style.display = locked ? '' : 'none';
+        scaleLinkBtn.querySelector('.scale-link-icon-unlinked').style.display = locked ? 'none' : '';
+    }
     document.getElementById('element-rotation').value = el.rotation;
     document.getElementById('element-rotation-value').textContent = formatValue(el.rotation) + '°';
     document.getElementById('element-opacity').value = el.opacity;
@@ -2882,7 +2898,69 @@ function setupElementEventListeners() {
 
     bindSlider('element-x', 'x', '%');
     bindSlider('element-y', 'y', '%');
-    bindSlider('element-width', 'width', '%');
+
+    // Scale X/Y sliders with optional link
+    const widthInput = document.getElementById('element-width');
+    const widthValueEl = document.getElementById('element-width-value');
+    const heightInput = document.getElementById('element-height');
+    const heightValueEl = document.getElementById('element-height-value');
+    const scaleLinkBtn = document.getElementById('element-scale-link');
+
+    if (widthInput) {
+        widthInput.addEventListener('input', () => {
+            const val = parseFloat(widthInput.value);
+            if (widthValueEl) widthValueEl.textContent = formatValue(val) + '%';
+            if (!selectedElementId) return;
+            const el = getSelectedElement();
+            if (!el) return;
+            el.width = val;
+            if (el.scaleLocked !== false) {
+                el.height = val;
+                if (heightInput) heightInput.value = val;
+                if (heightValueEl) heightValueEl.textContent = formatValue(val) + '%';
+            }
+            updateCanvas();
+            updateElementsList();
+        });
+    }
+
+    if (heightInput) {
+        heightInput.addEventListener('input', () => {
+            const val = parseFloat(heightInput.value);
+            if (heightValueEl) heightValueEl.textContent = formatValue(val) + '%';
+            if (!selectedElementId) return;
+            const el = getSelectedElement();
+            if (!el) return;
+            el.height = val;
+            if (el.scaleLocked !== false) {
+                el.width = val;
+                if (widthInput) widthInput.value = val;
+                if (widthValueEl) widthValueEl.textContent = formatValue(val) + '%';
+            }
+            updateCanvas();
+            updateElementsList();
+        });
+    }
+
+    if (scaleLinkBtn) {
+        scaleLinkBtn.addEventListener('click', () => {
+            const el = getSelectedElement();
+            if (!el) return;
+            el.scaleLocked = el.scaleLocked === false;
+            const locked = el.scaleLocked !== false;
+            scaleLinkBtn.classList.toggle('active', locked);
+            scaleLinkBtn.querySelector('.scale-link-icon-linked').style.display = locked ? '' : 'none';
+            scaleLinkBtn.querySelector('.scale-link-icon-unlinked').style.display = locked ? 'none' : '';
+            // When re-linking, snap height to width
+            if (locked && el.height !== el.width) {
+                el.height = el.width;
+                if (heightInput) heightInput.value = el.width;
+                if (heightValueEl) heightValueEl.textContent = formatValue(el.width) + '%';
+                updateCanvas();
+            }
+        });
+    }
+
     bindSlider('element-rotation', 'rotation', '°');
     bindSlider('element-opacity', 'opacity', '%');
     bindSlider('element-font-size', 'fontSize', '', parseInt);
@@ -7629,6 +7707,7 @@ function drawElementsToContext(context, dims, elements, layer) {
         const cx = dims.width * (el.x / 100);
         const cy = dims.height * (el.y / 100);
         const elWidth = dims.width * (el.width / 100);
+        const elScaleY = el.height ?? el.width;
 
         context.translate(cx, cy);
         if (el.rotation !== 0) {
@@ -7654,8 +7733,9 @@ function drawElementsToContext(context, dims, elements, layer) {
                 context.shadowOffsetX = s.x || 0;
                 context.shadowOffsetY = s.y || 0;
             }
-            // Icons are square (1:1)
-            context.drawImage(el.image, -elWidth / 2, -elWidth / 2, elWidth, elWidth);
+            // elHeight: 100% scaleY = full canvas width (same as icon at width 100%, which is square)
+            const elHeight = dims.width * (elScaleY / 100);
+            context.drawImage(el.image, -elWidth / 2, -elHeight / 2, elWidth, elHeight);
             // Reset shadow
             if (el.iconShadow?.enabled) {
                 context.shadowColor = 'transparent';
@@ -7665,7 +7745,8 @@ function drawElementsToContext(context, dims, elements, layer) {
             }
         } else if (el.type === 'graphic' && el.image) {
             const aspect = el.image.height / el.image.width;
-            const elHeight = elWidth * aspect;
+            // 100% scaleY = the height the image would have if width=100% (natural aspect at full canvas width)
+            const elHeight = dims.width * aspect * (elScaleY / 100);
             context.drawImage(el.image, -elWidth / 2, -elHeight / 2, elWidth, elHeight);
         } else if (el.type === 'text') {
             const elText = getElementText(el);
