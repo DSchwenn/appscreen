@@ -1192,6 +1192,150 @@
                         </div>
                     </div>
 
+                    <!-- Image graphic properties (non-SVG raster images only) -->
+                    <div id="element-graphic-image-properties" style="display: none;">
+                        <div class="divider"></div>
+                        <!-- Crop -->
+                        <div class="control-group">
+                            <div class="toggle-row collapsible collapsed" data-target="element-graphic-crop-options">
+                                <span class="toggle-label">
+                                    <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                    Crop
+                                </span>
+                                <button class="toggle" id="element-graphic-crop-toggle"><span class="toggle-knob"></span></button>
+                            </div>
+                        </div>
+                        <div id="element-graphic-crop-options" style="display: none;">
+                            <div class="control-group">
+                                <canvas class="popout-crop-preview" id="element-graphic-crop-preview"></canvas>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Crop X</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-crop-x" min="0" max="90" value="0" step="1">
+                                    <span class="range-value" id="element-graphic-crop-x-value">0%</span>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Crop Y</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-crop-y" min="0" max="90" value="0" step="1">
+                                    <span class="range-value" id="element-graphic-crop-y-value">0%</span>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Crop Width</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-crop-width" min="5" max="100" value="100" step="1">
+                                    <span class="range-value" id="element-graphic-crop-width-value">100%</span>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Crop Height</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-crop-height" min="5" max="100" value="100" step="1">
+                                    <span class="range-value" id="element-graphic-crop-height-value">100%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Corner Radius -->
+                        <div class="control-group">
+                            <label class="control-label">Corner Radius</label>
+                            <div class="control-row">
+                                <input type="range" id="element-graphic-corner-radius" min="0" max="50" value="0">
+                                <span class="range-value" id="element-graphic-corner-radius-value">0px</span>
+                            </div>
+                        </div>
+                        <!-- Shadow -->
+                        <div class="divider"></div>
+                        <div class="control-group">
+                            <div class="toggle-row collapsible collapsed" data-target="element-graphic-shadow-options">
+                                <span class="toggle-label">
+                                    <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                    Shadow
+                                </span>
+                                <div class="toggle" id="element-graphic-shadow-toggle"></div>
+                            </div>
+                        </div>
+                        <div id="element-graphic-shadow-options" style="display: none;">
+                            <div class="control-group">
+                                <label class="control-label">Shadow Color</label>
+                                <div class="color-input-wrapper">
+                                    <input type="color" id="element-graphic-shadow-color" value="#000000">
+                                    <input type="text" id="element-graphic-shadow-color-hex" value="#000000">
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Blur</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-shadow-blur" min="0" max="100" value="20">
+                                    <span class="range-value" id="element-graphic-shadow-blur-value">20px</span>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Opacity</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-shadow-opacity" min="0" max="100" value="40">
+                                    <span class="range-value" id="element-graphic-shadow-opacity-value">40%</span>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Offset X</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-shadow-x" min="-50" max="50" value="0">
+                                    <span class="range-value" id="element-graphic-shadow-x-value">0px</span>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Offset Y</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-shadow-y" min="-50" max="50" value="10">
+                                    <span class="range-value" id="element-graphic-shadow-y-value">10px</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Border -->
+                        <div class="divider"></div>
+                        <div class="control-group">
+                            <div class="toggle-row collapsible collapsed" data-target="element-graphic-border-options">
+                                <span class="toggle-label">
+                                    <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <polyline points="6 9 12 15 18 9"/>
+                                    </svg>
+                                    Border
+                                </span>
+                                <button class="toggle" id="element-graphic-border-toggle"><span class="toggle-knob"></span></button>
+                            </div>
+                        </div>
+                        <div id="element-graphic-border-options" style="display: none;">
+                            <div class="control-group">
+                                <label class="control-label">Border Color</label>
+                                <div class="color-input-wrapper">
+                                    <input type="color" id="element-graphic-border-color" value="#ffffff">
+                                    <input type="text" id="element-graphic-border-color-hex" value="#ffffff">
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Width</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-border-width" min="1" max="20" value="3">
+                                    <span class="range-value" id="element-graphic-border-width-value">3px</span>
+                                </div>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">Opacity</label>
+                                <div class="control-row">
+                                    <input type="range" id="element-graphic-border-opacity" min="0" max="100" value="100">
+                                    <span class="range-value" id="element-graphic-border-opacity-value">100%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Icon element properties -->
                     <div id="element-icon-properties" style="display: none;">
                         <div class="divider"></div>

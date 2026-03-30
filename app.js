@@ -328,6 +328,12 @@ function addGraphicElement(img, src, name, svgRaw = null) {
         name: name || 'Graphic',
         svgRaw: svgRaw,
         svgColor: null,
+        // Image-only crop / effects (not used for SVG)
+        cropEnabled: false,
+        cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
+        cornerRadius: 0,
+        shadow: { enabled: false, color: '#000000', blur: 20, opacity: 40, x: 0, y: 10 },
+        border: { enabled: false, color: '#ffffff', width: 3, opacity: 100 },
         text: '',
         font: "-apple-system, BlinkMacSystemFont, 'SF Pro Display'",
         fontSize: 60,
@@ -2629,11 +2635,13 @@ function updateElementProperties() {
     const textProps = document.getElementById('element-text-properties');
     const iconProps = document.getElementById('element-icon-properties');
     const svgProps = document.getElementById('element-graphic-svg-properties');
+    const imgProps = document.getElementById('element-graphic-image-properties');
 
     // Hide all type-specific panels first
     textProps.style.display = 'none';
     if (iconProps) iconProps.style.display = 'none';
     if (svgProps) svgProps.style.display = 'none';
+    if (imgProps) imgProps.style.display = 'none';
 
     if (el.type === 'graphic' && el.svgRaw && svgProps) {
         svgProps.style.display = '';
@@ -2685,6 +2693,58 @@ function updateElementProperties() {
         document.getElementById('element-icon-shadow-x-value').textContent = shadow.x + 'px';
         document.getElementById('element-icon-shadow-y').value = shadow.y;
         document.getElementById('element-icon-shadow-y-value').textContent = shadow.y + 'px';
+    } else if (el.type === 'graphic' && !el.svgRaw && imgProps) {
+        imgProps.style.display = '';
+
+        // Crop
+        const cropToggle = document.getElementById('element-graphic-crop-toggle');
+        const cropOpts = document.getElementById('element-graphic-crop-options');
+        const cropRow = cropToggle?.closest('.toggle-row');
+        if (cropToggle) cropToggle.classList.toggle('active', !!el.cropEnabled);
+        if (cropRow) cropRow.classList.toggle('collapsed', !el.cropEnabled);
+        if (cropOpts) cropOpts.style.display = el.cropEnabled ? '' : 'none';
+        const setSlider = (id, val, suffix) => {
+            const input = document.getElementById(id);
+            const valEl = document.getElementById(id + '-value');
+            if (input) input.value = val;
+            if (valEl) valEl.textContent = formatValue(val) + suffix;
+        };
+        setSlider('element-graphic-crop-x', el.cropX ?? 0, '%');
+        setSlider('element-graphic-crop-y', el.cropY ?? 0, '%');
+        setSlider('element-graphic-crop-width', el.cropWidth ?? 100, '%');
+        setSlider('element-graphic-crop-height', el.cropHeight ?? 100, '%');
+        if (el.cropEnabled) updateElementGraphicCropPreview();
+
+        // Corner radius
+        setSlider('element-graphic-corner-radius', el.cornerRadius ?? 0, 'px');
+
+        // Shadow
+        const shadow = el.shadow || { enabled: false, color: '#000000', blur: 20, opacity: 40, x: 0, y: 10 };
+        const shadowToggle = document.getElementById('element-graphic-shadow-toggle');
+        const shadowOpts = document.getElementById('element-graphic-shadow-options');
+        const shadowRow = shadowToggle?.closest('.toggle-row');
+        if (shadowToggle) shadowToggle.classList.toggle('active', shadow.enabled);
+        if (shadowRow) shadowRow.classList.toggle('collapsed', !shadow.enabled);
+        if (shadowOpts) shadowOpts.style.display = shadow.enabled ? '' : 'none';
+        document.getElementById('element-graphic-shadow-color').value = shadow.color;
+        document.getElementById('element-graphic-shadow-color-hex').value = shadow.color;
+        setSlider('element-graphic-shadow-blur', shadow.blur, 'px');
+        setSlider('element-graphic-shadow-opacity', shadow.opacity, '%');
+        setSlider('element-graphic-shadow-x', shadow.x, 'px');
+        setSlider('element-graphic-shadow-y', shadow.y, 'px');
+
+        // Border
+        const border = el.border || { enabled: false, color: '#ffffff', width: 3, opacity: 100 };
+        const borderToggle = document.getElementById('element-graphic-border-toggle');
+        const borderOpts = document.getElementById('element-graphic-border-options');
+        const borderRow = borderToggle?.closest('.toggle-row');
+        if (borderToggle) borderToggle.classList.toggle('active', border.enabled);
+        if (borderRow) borderRow.classList.toggle('collapsed', !border.enabled);
+        if (borderOpts) borderOpts.style.display = border.enabled ? '' : 'none';
+        document.getElementById('element-graphic-border-color').value = border.color;
+        document.getElementById('element-graphic-border-color-hex').value = border.color;
+        setSlider('element-graphic-border-width', border.width, 'px');
+        setSlider('element-graphic-border-opacity', border.opacity, '%');
     }
 }
 
@@ -3054,6 +3114,180 @@ function setupElementEventListeners() {
 
     // Canvas drag interaction for elements
     setupElementCanvasDrag();
+
+    // Image graphic element: crop, corner radius, shadow, border
+    const bindImgSlider = (id, updater, suffix) => {
+        const input = document.getElementById(id);
+        const valEl = document.getElementById(id + '-value');
+        if (!input) return;
+        input.addEventListener('input', () => {
+            const val = parseFloat(input.value);
+            if (valEl) valEl.textContent = formatValue(val) + suffix;
+            updater(val);
+        });
+    };
+
+    // Crop toggle
+    const cropToggle = document.getElementById('element-graphic-crop-toggle');
+    if (cropToggle) {
+        cropToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || el.svgRaw) return;
+            el.cropEnabled = !el.cropEnabled;
+            cropToggle.classList.toggle('active', el.cropEnabled);
+            const cropOpts = document.getElementById('element-graphic-crop-options');
+            const cropRow = cropToggle.closest('.toggle-row');
+            if (cropRow) cropRow.classList.toggle('collapsed', !el.cropEnabled);
+            if (cropOpts) {
+                cropOpts.style.display = el.cropEnabled ? 'block' : 'none';
+                if (el.cropEnabled) updateElementGraphicCropPreview();
+            }
+            updateCanvas();
+            saveState();
+        });
+    }
+
+    bindImgSlider('element-graphic-crop-x', (val) => {
+        const el = getSelectedElement();
+        if (!el || el.type !== 'graphic' || el.svgRaw) return;
+        el.cropX = val;
+        updateElementGraphicCropPreview();
+        updateCanvas();
+    }, '%');
+    bindImgSlider('element-graphic-crop-y', (val) => {
+        const el = getSelectedElement();
+        if (!el || el.type !== 'graphic' || el.svgRaw) return;
+        el.cropY = val;
+        updateElementGraphicCropPreview();
+        updateCanvas();
+    }, '%');
+    bindImgSlider('element-graphic-crop-width', (val) => {
+        const el = getSelectedElement();
+        if (!el || el.type !== 'graphic' || el.svgRaw) return;
+        el.cropWidth = val;
+        updateElementGraphicCropPreview();
+        updateCanvas();
+    }, '%');
+    bindImgSlider('element-graphic-crop-height', (val) => {
+        const el = getSelectedElement();
+        if (!el || el.type !== 'graphic' || el.svgRaw) return;
+        el.cropHeight = val;
+        updateElementGraphicCropPreview();
+        updateCanvas();
+    }, '%');
+
+    // Corner radius
+    bindImgSlider('element-graphic-corner-radius', (val) => {
+        const el = getSelectedElement();
+        if (!el || el.type !== 'graphic' || el.svgRaw) return;
+        el.cornerRadius = val;
+        updateCanvas();
+    }, 'px');
+
+    // Shadow toggle
+    const graphicShadowToggle = document.getElementById('element-graphic-shadow-toggle');
+    if (graphicShadowToggle) {
+        graphicShadowToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || el.svgRaw) return;
+            if (!el.shadow) el.shadow = { enabled: false, color: '#000000', blur: 20, opacity: 40, x: 0, y: 10 };
+            el.shadow.enabled = !el.shadow.enabled;
+            updateElementProperties();
+            updateCanvas();
+        });
+    }
+
+    const bindImgShadow = (id, prop, suffix) => {
+        bindImgSlider(id, (val) => {
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || el.svgRaw) return;
+            if (!el.shadow) el.shadow = { enabled: false, color: '#000000', blur: 20, opacity: 40, x: 0, y: 10 };
+            el.shadow[prop] = val;
+            updateCanvas();
+        }, suffix);
+    };
+    bindImgShadow('element-graphic-shadow-blur', 'blur', 'px');
+    bindImgShadow('element-graphic-shadow-opacity', 'opacity', '%');
+    bindImgShadow('element-graphic-shadow-x', 'x', 'px');
+    bindImgShadow('element-graphic-shadow-y', 'y', 'px');
+
+    const graphicShadowColor = document.getElementById('element-graphic-shadow-color');
+    const graphicShadowColorHex = document.getElementById('element-graphic-shadow-color-hex');
+    if (graphicShadowColor) {
+        graphicShadowColor.addEventListener('input', () => {
+            const el = getSelectedElement();
+            if (el?.type === 'graphic' && !el.svgRaw && el.shadow) {
+                el.shadow.color = graphicShadowColor.value;
+                if (graphicShadowColorHex) graphicShadowColorHex.value = graphicShadowColor.value;
+                updateCanvas();
+            }
+        });
+    }
+    if (graphicShadowColorHex) {
+        graphicShadowColorHex.addEventListener('change', () => {
+            if (!/^#[0-9a-fA-F]{6}$/.test(graphicShadowColorHex.value)) return;
+            const el = getSelectedElement();
+            if (el?.type === 'graphic' && !el.svgRaw && el.shadow) {
+                el.shadow.color = graphicShadowColorHex.value;
+                if (graphicShadowColor) graphicShadowColor.value = graphicShadowColorHex.value;
+                updateCanvas();
+            }
+        });
+    }
+
+    // Border toggle
+    const graphicBorderToggle = document.getElementById('element-graphic-border-toggle');
+    if (graphicBorderToggle) {
+        graphicBorderToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || el.svgRaw) return;
+            if (!el.border) el.border = { enabled: false, color: '#ffffff', width: 3, opacity: 100 };
+            el.border.enabled = !el.border.enabled;
+            updateElementProperties();
+            updateCanvas();
+        });
+    }
+
+    const bindImgBorder = (id, prop, suffix) => {
+        bindImgSlider(id, (val) => {
+            const el = getSelectedElement();
+            if (!el || el.type !== 'graphic' || el.svgRaw) return;
+            if (!el.border) el.border = { enabled: false, color: '#ffffff', width: 3, opacity: 100 };
+            el.border[prop] = val;
+            updateCanvas();
+        }, suffix);
+    };
+    bindImgBorder('element-graphic-border-width', 'width', 'px');
+    bindImgBorder('element-graphic-border-opacity', 'opacity', '%');
+
+    const graphicBorderColor = document.getElementById('element-graphic-border-color');
+    const graphicBorderColorHex = document.getElementById('element-graphic-border-color-hex');
+    if (graphicBorderColor) {
+        graphicBorderColor.addEventListener('input', () => {
+            const el = getSelectedElement();
+            if (el?.type === 'graphic' && !el.svgRaw && el.border) {
+                el.border.color = graphicBorderColor.value;
+                if (graphicBorderColorHex) graphicBorderColorHex.value = graphicBorderColor.value;
+                updateCanvas();
+            }
+        });
+    }
+    if (graphicBorderColorHex) {
+        graphicBorderColorHex.addEventListener('change', () => {
+            if (!/^#[0-9a-fA-F]{6}$/.test(graphicBorderColorHex.value)) return;
+            const el = getSelectedElement();
+            if (el?.type === 'graphic' && !el.svgRaw && el.border) {
+                el.border.color = graphicBorderColorHex.value;
+                if (graphicBorderColor) graphicBorderColor.value = graphicBorderColorHex.value;
+                updateCanvas();
+            }
+        });
+    }
+
+    setupElementGraphicCropDrag();
 }
 
 function setupElementCanvasDrag() {
@@ -3141,7 +3375,9 @@ function setupElementCanvasDrag() {
                 if (el.type === 'emoji' || el.type === 'icon') {
                     elHeight = elWidth; // square bounding box
                 } else if (el.type === 'graphic' && el.image) {
-                    elHeight = elWidth * (el.image.height / el.image.width);
+                    const sw = el.cropEnabled ? (el.cropWidth / 100) * el.image.width : el.image.width;
+                    const sh = el.cropEnabled ? (el.cropHeight / 100) * el.image.height : el.image.height;
+                    elHeight = elWidth * (sh / sw);
                 } else {
                     elHeight = el.fontSize * 1.5;
                 }
@@ -3787,6 +4023,191 @@ function setupCropPreviewDrag() {
     previewCanvas.addEventListener('touchstart', startCropDrag, { passive: false });
     previewCanvas.addEventListener('touchmove', (e) => { if (cropDragState) moveCropDrag(e); }, { passive: false });
     previewCanvas.addEventListener('touchend', endCropDrag);
+}
+
+// ===== Graphic element crop preview =====
+function updateElementGraphicCropPreview() {
+    const previewCanvas = document.getElementById('element-graphic-crop-preview');
+    if (!previewCanvas) return;
+    const el = getSelectedElement();
+    if (!el || el.type !== 'graphic' || el.svgRaw || !el.image) return;
+    const img = el.image;
+
+    const containerWidth = previewCanvas.parentElement?.clientWidth || 280;
+    const imgAspect = img.width / img.height;
+    const canvasW = containerWidth * 2;
+    const canvasH = Math.round(canvasW / imgAspect);
+    previewCanvas.width = canvasW;
+    previewCanvas.height = canvasH;
+    previewCanvas.style.width = containerWidth + 'px';
+    previewCanvas.style.height = Math.round(containerWidth / imgAspect) + 'px';
+
+    const ctx2 = previewCanvas.getContext('2d');
+    const layout = getCropPreviewLayout(previewCanvas, img);
+    const { drawX, drawY, drawW, drawH } = layout;
+
+    ctx2.clearRect(0, 0, canvasW, canvasH);
+    ctx2.drawImage(img, drawX, drawY, drawW, drawH);
+
+    const cropX = el.cropX ?? 0;
+    const cropY = el.cropY ?? 0;
+    const cropW = el.cropWidth ?? 100;
+    const cropH = el.cropHeight ?? 100;
+
+    const rx = drawX + (cropX / 100) * drawW;
+    const ry = drawY + (cropY / 100) * drawH;
+    const rw = (cropW / 100) * drawW;
+    const rh = (cropH / 100) * drawH;
+
+    ctx2.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx2.fillRect(0, 0, canvasW, canvasH);
+
+    ctx2.save();
+    ctx2.beginPath();
+    ctx2.rect(rx, ry, rw, rh);
+    ctx2.clip();
+    ctx2.clearRect(rx, ry, rw, rh);
+    ctx2.drawImage(img, drawX, drawY, drawW, drawH);
+    ctx2.restore();
+
+    ctx2.strokeStyle = 'rgba(10, 132, 255, 0.9)';
+    ctx2.lineWidth = 2;
+    ctx2.strokeRect(rx, ry, rw, rh);
+
+    const handleSize = 8;
+    const handles = [
+        { x: rx, y: ry }, { x: rx + rw, y: ry },
+        { x: rx, y: ry + rh }, { x: rx + rw, y: ry + rh },
+    ];
+    const midHandles = [
+        { x: rx + rw / 2, y: ry }, { x: rx + rw / 2, y: ry + rh },
+        { x: rx, y: ry + rh / 2 }, { x: rx + rw, y: ry + rh / 2 },
+    ];
+    ctx2.fillStyle = '#ffffff';
+    ctx2.strokeStyle = 'rgba(10, 132, 255, 1)';
+    ctx2.lineWidth = 1.5;
+    [...handles, ...midHandles].forEach(h => {
+        ctx2.fillRect(h.x - handleSize / 2, h.y - handleSize / 2, handleSize, handleSize);
+        ctx2.strokeRect(h.x - handleSize / 2, h.y - handleSize / 2, handleSize, handleSize);
+    });
+}
+
+let elGraphicCropDragState = null;
+
+function setupElementGraphicCropDrag() {
+    const previewCanvas = document.getElementById('element-graphic-crop-preview');
+    if (!previewCanvas) return;
+
+    function getCoords(e) {
+        const rect = previewCanvas.getBoundingClientRect();
+        const scaleX = previewCanvas.width / rect.width;
+        const scaleY = previewCanvas.height / rect.height;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+    }
+
+    function hitTest(coords) {
+        const el = getSelectedElement();
+        if (!el || !el.image) return null;
+        const layout = getCropPreviewLayout(previewCanvas, el.image);
+        const { drawX, drawY, drawW, drawH } = layout;
+        const rx = drawX + ((el.cropX ?? 0) / 100) * drawW;
+        const ry = drawY + ((el.cropY ?? 0) / 100) * drawH;
+        const rw = ((el.cropWidth ?? 100) / 100) * drawW;
+        const rh = ((el.cropHeight ?? 100) / 100) * drawH;
+        const hitR = 12;
+        const tests = [
+            { x: rx, y: ry, handle: 'top-left' }, { x: rx + rw, y: ry, handle: 'top-right' },
+            { x: rx, y: ry + rh, handle: 'bottom-left' }, { x: rx + rw, y: ry + rh, handle: 'bottom-right' },
+            { x: rx + rw / 2, y: ry, handle: 'top' }, { x: rx + rw / 2, y: ry + rh, handle: 'bottom' },
+            { x: rx, y: ry + rh / 2, handle: 'left' }, { x: rx + rw, y: ry + rh / 2, handle: 'right' },
+        ];
+        for (const t of tests) {
+            if (Math.abs(coords.x - t.x) < hitR && Math.abs(coords.y - t.y) < hitR) return t.handle;
+        }
+        if (coords.x >= rx && coords.x <= rx + rw && coords.y >= ry && coords.y <= ry + rh) return 'move';
+        return null;
+    }
+
+    function onDown(e) {
+        const coords = getCoords(e);
+        const handle = hitTest(coords);
+        if (!handle) return;
+        e.preventDefault();
+        const el = getSelectedElement();
+        if (!el) return;
+        elGraphicCropDragState = {
+            handle,
+            startX: coords.x, startY: coords.y,
+            origCropX: el.cropX ?? 0, origCropY: el.cropY ?? 0,
+            origCropW: el.cropWidth ?? 100, origCropH: el.cropHeight ?? 100,
+        };
+    }
+
+    function onMove(e) {
+        if (!elGraphicCropDragState) {
+            const coords = getCoords(e);
+            const handle = hitTest(coords);
+            const cursorMap = {
+                'top-left': 'nwse-resize', 'bottom-right': 'nwse-resize',
+                'top-right': 'nesw-resize', 'bottom-left': 'nesw-resize',
+                'top': 'ns-resize', 'bottom': 'ns-resize',
+                'left': 'ew-resize', 'right': 'ew-resize',
+                'move': 'move',
+            };
+            previewCanvas.style.cursor = cursorMap[handle] || 'default';
+            return;
+        }
+        e.preventDefault();
+        const el = getSelectedElement();
+        if (!el || !el.image) return;
+        const coords = getCoords(e);
+        const layout = getCropPreviewLayout(previewCanvas, el.image);
+        const { drawW, drawH } = layout;
+        const dxPct = ((coords.x - elGraphicCropDragState.startX) / drawW) * 100;
+        const dyPct = ((coords.y - elGraphicCropDragState.startY) / drawH) * 100;
+        const h = elGraphicCropDragState.handle;
+        const orig = elGraphicCropDragState;
+        let newX = orig.origCropX, newY = orig.origCropY, newW = orig.origCropW, newH = orig.origCropH;
+        if (h === 'move') {
+            newX = Math.max(0, Math.min(100 - newW, orig.origCropX + dxPct));
+            newY = Math.max(0, Math.min(100 - newH, orig.origCropY + dyPct));
+        } else {
+            if (h.includes('left')) { newX = orig.origCropX + dxPct; newW = orig.origCropW - dxPct; }
+            if (h.includes('right') || h === 'right') { newW = orig.origCropW + dxPct; }
+            if (h.includes('top')) { newY = orig.origCropY + dyPct; newH = orig.origCropH - dyPct; }
+            if (h.includes('bottom') || h === 'bottom') { newH = orig.origCropH + dyPct; }
+            if (newW < 5) { if (h.includes('left')) newX = orig.origCropX + orig.origCropW - 5; newW = 5; }
+            if (newH < 5) { if (h.includes('top')) newY = orig.origCropY + orig.origCropH - 5; newH = 5; }
+            newX = Math.max(0, newX); newY = Math.max(0, newY);
+            if (newX + newW > 100) newW = 100 - newX;
+            if (newY + newH > 100) newH = 100 - newY;
+        }
+        el.cropX = newX; el.cropY = newY; el.cropWidth = newW; el.cropHeight = newH;
+        // Sync sliders
+        const setSlider = (id, val, suffix) => {
+            const input = document.getElementById(id);
+            const valEl = document.getElementById(id + '-value');
+            if (input) input.value = val;
+            if (valEl) valEl.textContent = formatValue(val) + suffix;
+        };
+        setSlider('element-graphic-crop-x', newX, '%');
+        setSlider('element-graphic-crop-y', newY, '%');
+        setSlider('element-graphic-crop-width', newW, '%');
+        setSlider('element-graphic-crop-height', newH, '%');
+        updateElementGraphicCropPreview();
+        updateCanvas();
+    }
+
+    function onUp() { elGraphicCropDragState = null; }
+
+    previewCanvas.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    previewCanvas.addEventListener('touchstart', onDown, { passive: false });
+    previewCanvas.addEventListener('touchmove', (e) => { if (elGraphicCropDragState) onMove(e); }, { passive: false });
+    previewCanvas.addEventListener('touchend', onUp);
 }
 
 function setupPopoutEventListeners() {
@@ -7769,10 +8190,59 @@ function drawElementsToContext(context, dims, elements, layer) {
                 context.shadowOffsetY = 0;
             }
         } else if (el.type === 'graphic' && el.image) {
-            const aspect = el.image.height / el.image.width;
+            // Source crop rectangle (percentages of image pixels)
+            const sx = el.cropEnabled ? (el.cropX / 100) * el.image.width : 0;
+            const sy = el.cropEnabled ? (el.cropY / 100) * el.image.height : 0;
+            const sw = el.cropEnabled ? (el.cropWidth / 100) * el.image.width : el.image.width;
+            const sh = el.cropEnabled ? (el.cropHeight / 100) * el.image.height : el.image.height;
+
+            // Display height: based on crop aspect (or full aspect when no crop)
+            const dispAspect = sh / sw;
             // 100% scaleY = the height the image would have if width=100% (natural aspect at full canvas width)
-            const elHeight = dims.width * aspect * (elScaleY / 100);
-            context.drawImage(el.image, -elWidth / 2, -elHeight / 2, elWidth, elHeight);
+            const elHeight = dims.width * dispAspect * (elScaleY / 100);
+
+            const halfW = elWidth / 2;
+            const halfH = elHeight / 2;
+            const radius = (el.cornerRadius || 0) * (elWidth / 300);
+
+            // Shadow
+            if (el.shadow?.enabled) {
+                const shadowOpacity = el.shadow.opacity / 100;
+                const hex = el.shadow.color || '#000000';
+                const r = parseInt(hex.slice(1, 3), 16);
+                const g = parseInt(hex.slice(3, 5), 16);
+                const b = parseInt(hex.slice(5, 7), 16);
+                context.shadowColor = `rgba(${r},${g},${b},${shadowOpacity})`;
+                context.shadowBlur = el.shadow.blur;
+                context.shadowOffsetX = el.shadow.x;
+                context.shadowOffsetY = el.shadow.y;
+                context.fillStyle = '#000';
+                context.beginPath();
+                context.roundRect(-halfW, -halfH, elWidth, elHeight, radius);
+                context.fill();
+                context.shadowColor = 'transparent';
+                context.shadowBlur = 0;
+                context.shadowOffsetX = 0;
+                context.shadowOffsetY = 0;
+            }
+
+            // Border
+            if (el.border?.enabled) {
+                const bw = el.border.width;
+                context.save();
+                context.globalAlpha = (el.opacity / 100) * (el.border.opacity / 100);
+                context.fillStyle = el.border.color;
+                context.beginPath();
+                context.roundRect(-halfW - bw, -halfH - bw, elWidth + bw * 2, elHeight + bw * 2, radius + bw);
+                context.fill();
+                context.restore();
+            }
+
+            // Clip to rounded rect and draw
+            context.beginPath();
+            context.roundRect(-halfW, -halfH, elWidth, elHeight, radius);
+            context.clip();
+            context.drawImage(el.image, sx, sy, sw, sh, -halfW, -halfH, elWidth, elHeight);
         } else if (el.type === 'text') {
             const elText = getElementText(el);
             if (!elText) { context.restore(); return; }
