@@ -228,15 +228,15 @@ function syncActiveLayoutProfileFromCurrentScreenshot() {
 }
 
 function switchOutputDeviceWithProfiles(newDevice, newCustomWidth = state.customWidth, newCustomHeight = state.customHeight) {
-    const screenshot = getCurrentScreenshot();
     const prevDevice = state.outputDevice;
     const prevCustomWidth = state.customWidth;
     const prevCustomHeight = state.customHeight;
     const prevKey = getOutputDeviceProfileKey(prevDevice, prevCustomWidth, prevCustomHeight);
 
-    if (screenshot) {
-        captureCurrentLayoutToProfile(screenshot, prevKey);
-    }
+    // Step 1: snapshot every screenshot's current in-memory state into the previous device's profile.
+    state.screenshots.forEach(ss => {
+        captureCurrentLayoutToProfile(ss, prevKey);
+    });
 
     state.outputDevice = newDevice;
     if (newDevice === 'custom') {
@@ -245,16 +245,19 @@ function switchOutputDeviceWithProfiles(newDevice, newCustomWidth = state.custom
     }
 
     const nextKey = getOutputDeviceProfileKey(newDevice, state.customWidth, state.customHeight);
-    if (screenshot) {
-        const profiles = ensureLayoutProfiles(screenshot);
+
+    // Step 2: apply the new device's profile to EVERY screenshot so the whole project
+    // is consistent immediately — not just after each card is individually selected.
+    isApplyingLayoutProfile = true;
+    state.screenshots.forEach(ss => {
+        const profiles = ensureLayoutProfiles(ss);
         if (!profiles[nextKey]) {
-            // Brand-new profile: clone everything from previous device as starting point.
-            if (!cloneLayoutProfile(screenshot, prevKey, nextKey)) {
-                captureCurrentLayoutToProfile(screenshot, nextKey);
+            // Brand-new profile: clone from previous device as starting point.
+            if (!cloneLayoutProfile(ss, prevKey, nextKey)) {
+                captureCurrentLayoutToProfile(ss, nextKey);
             }
         } else if (profiles[nextKey].elements === undefined || profiles[nextKey].popouts === undefined) {
-            // One-time migration: profile was saved before elements/popouts were tracked per-device.
-            // Backfill from the previous device's profile so live elements don't bleed across.
+            // One-time migration: profile predates per-device element/popout tracking.
             const srcProfile = profiles[prevKey];
             if (profiles[nextKey].elements === undefined) {
                 profiles[nextKey].elements = srcProfile?.elements !== undefined
@@ -267,10 +270,9 @@ function switchOutputDeviceWithProfiles(newDevice, newCustomWidth = state.custom
                     : [];
             }
         }
-        isApplyingLayoutProfile = true;
-        applyLayoutProfileToScreenshot(screenshot, nextKey);
-        isApplyingLayoutProfile = false;
-    }
+        applyLayoutProfileToScreenshot(ss, nextKey);
+    });
+    isApplyingLayoutProfile = false;
 
     syncUIWithState();
     updateGradientStopsUI();
@@ -1816,7 +1818,7 @@ function saveState() {
             name: s.name,
             deviceType: s.deviceType,
             localizedImages: localizedImages,
-            background: s.background,
+            background: serializeBackgroundForProfile(s.background), // strips Image so IndexedDB structured clone succeeds
             screenshot: s.screenshot,
             text: s.text,
             elements: (s.elements || []).map(el => ({
@@ -2125,6 +2127,16 @@ function loadState() {
                         }
                     }
 
+                    // Load defaults early — must be set before image-load callbacks fire.
+                    if (parsed.defaults) {
+                        state.defaults = parsed.defaults;
+                        if (!state.defaults.elements) state.defaults.elements = [];
+                    } else {
+                        state.defaults.background = migratedBackground;
+                        state.defaults.screenshot = migratedScreenshot;
+                        state.defaults.text = migratedText;
+                    }
+
                     if (parsed.screenshots && parsed.screenshots.length > 0) {
                         let loadedCount = 0;
                         const totalToLoad = parsed.screenshots.length;
@@ -2144,7 +2156,7 @@ function loadState() {
                                     name: s.name || 'Blank Screen',
                                     deviceType: s.deviceType,
                                     localizedImages: {},
-                                    background: s.background || JSON.parse(JSON.stringify(migratedBackground)),
+                                    background: hydrateBackgroundFromProfile(s.background || migratedBackground),
                                     screenshot: screenshotSettings,
                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                     elements: reconstructElementImages(s.elements),
@@ -2174,7 +2186,7 @@ function loadState() {
 
                                             if (langLoadedCount === langKeys.length) {
                                                 // All language versions loaded
-                                                const firstLang = langKeys[0];
+                                                const firstLang = langKeys.find(k => localizedImages[k]) || langKeys[0];
                                                 const screenshotSettings = s.screenshot || JSON.parse(JSON.stringify(migratedScreenshot));
                                                 if (needs3DMigration) {
                                                     migrate3DPosition(screenshotSettings);
@@ -2184,7 +2196,33 @@ function loadState() {
                                                     name: s.name,
                                                     deviceType: s.deviceType,
                                                     localizedImages: localizedImages,
-                                                    background: s.background || JSON.parse(JSON.stringify(migratedBackground)),
+                                                    background: hydrateBackgroundFromProfile(s.background || migratedBackground),
+                                                    screenshot: screenshotSettings,
+                                                    text: s.text || JSON.parse(JSON.stringify(migratedText)),
+                                                    elements: reconstructElementImages(s.elements),
+                                                    popouts: s.popouts || [],
+                                                    overrides: s.overrides || {},
+                                                    layoutProfiles: s.layoutProfiles || {}
+                                                };
+                                                loadedCount++;
+                                                checkAllLoaded();
+                                            }
+                                        };
+                                        langImg.onerror = () => {
+                                            // Keep loading even if one localized image source is unavailable.
+                                            langLoadedCount++;
+                                            if (langLoadedCount === langKeys.length) {
+                                                const firstLang = langKeys.find(k => localizedImages[k]) || langKeys[0];
+                                                const screenshotSettings = s.screenshot || JSON.parse(JSON.stringify(migratedScreenshot));
+                                                if (needs3DMigration) {
+                                                    migrate3DPosition(screenshotSettings);
+                                                }
+                                                state.screenshots[index] = {
+                                                    image: localizedImages[firstLang]?.image || null,
+                                                    name: s.name,
+                                                    deviceType: s.deviceType,
+                                                    localizedImages: localizedImages,
+                                                    background: hydrateBackgroundFromProfile(s.background || migratedBackground),
                                                     screenshot: screenshotSettings,
                                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                                     elements: reconstructElementImages(s.elements),
@@ -2230,7 +2268,39 @@ function loadState() {
                                         name: s.name,
                                         deviceType: s.deviceType,
                                         localizedImages: localizedImages,
-                                        background: s.background || JSON.parse(JSON.stringify(migratedBackground)),
+                                        background: hydrateBackgroundFromProfile(s.background || migratedBackground),
+                                        screenshot: screenshotSettings,
+                                        text: s.text || JSON.parse(JSON.stringify(migratedText)),
+                                        elements: reconstructElementImages(s.elements),
+                                        popouts: s.popouts || [],
+                                        overrides: s.overrides || {},
+                                        layoutProfiles: s.layoutProfiles || {}
+                                    };
+                                    loadedCount++;
+                                    checkAllLoaded();
+                                };
+                                img.onerror = () => {
+                                    // Broken source URL should not block project loading.
+                                    const detectedLang = typeof detectLanguageFromFilename === 'function'
+                                        ? detectLanguageFromFilename(s.name || '')
+                                        : 'en';
+
+                                    const screenshotSettings = s.screenshot || JSON.parse(JSON.stringify(migratedScreenshot));
+                                    if (needs3DMigration) {
+                                        migrate3DPosition(screenshotSettings);
+                                    }
+                                    state.screenshots[index] = {
+                                        image: null,
+                                        name: s.name,
+                                        deviceType: s.deviceType,
+                                        localizedImages: {
+                                            [detectedLang]: {
+                                                image: null,
+                                                src: s.src,
+                                                name: s.name
+                                            }
+                                        },
+                                        background: hydrateBackgroundFromProfile(s.background || migratedBackground),
                                         screenshot: screenshotSettings,
                                         text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                         elements: reconstructElementImages(s.elements),
@@ -2247,10 +2317,15 @@ function loadState() {
 
                         function checkAllLoaded() {
                             if (loadedCount === totalToLoad) {
+                                // Clamp selectedIndex in case the saved value is out of bounds.
+                                if (state.selectedIndex >= state.screenshots.length) {
+                                    state.selectedIndex = Math.max(0, state.screenshots.length - 1);
+                                }
                                 updateScreenshotList();
                                 syncUIWithState();
                                 updateGradientStopsUI();
                                 updateCanvas();
+                                resolve(); // Resolve only after all images are loaded.
 
                                 if (needsMigration && parsed.screenshots.length > 0) {
                                     showMigrationPrompt();
@@ -2263,33 +2338,14 @@ function loadState() {
                         syncUIWithState();
                         updateGradientStopsUI();
                         updateCanvas();
-                    }
-
-                    state.selectedIndex = parsed.selectedIndex || 0;
-                    state.outputDevice = parsed.outputDevice || 'iphone-6.9';
-                    state.customWidth = parsed.customWidth || 1320;
-                    state.customHeight = parsed.customHeight || 2868;
-
-                    // Load global language settings
-                    state.currentLanguage = parsed.currentLanguage || 'en';
-                    state.projectLanguages = parsed.projectLanguages || ['en'];
-
-                    // Load defaults (new format) or use migrated settings
-                    if (parsed.defaults) {
-                        state.defaults = parsed.defaults;
-                        // Ensure elements array exists (may be missing from older saves)
-                        if (!state.defaults.elements) state.defaults.elements = [];
-                    } else {
-                        state.defaults.background = migratedBackground;
-                        state.defaults.screenshot = migratedScreenshot;
-                        state.defaults.text = migratedText;
+                        resolve();
                     }
                 } else {
                     // New project, reset to defaults
                     resetStateToDefaults();
                     updateScreenshotList();
+                    resolve();
                 }
-                resolve();
             };
 
             request.onerror = () => {
@@ -7990,6 +8046,7 @@ function updateCanvas() {
     // Draw screenshot (2D mode) or 3D phone model
     if (state.screenshots.length > 0) {
         const screenshot = state.screenshots[state.selectedIndex];
+        if (!screenshot) return; // Guard: image not yet loaded (async load in progress)
         const img = screenshot ? getScreenshotImage(screenshot) : null;
         const ss = getScreenshotSettings();
         const use3D = ss.use3D || false;
