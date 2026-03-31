@@ -233,6 +233,14 @@ function switchOutputDeviceWithProfiles(newDevice, newCustomWidth = state.custom
     const prevCustomHeight = state.customHeight;
     const prevKey = getOutputDeviceProfileKey(prevDevice, prevCustomWidth, prevCustomHeight);
 
+    // Belt-and-suspenders: capture the selected screenshot first, before the full loop.
+    // This ensures the very latest in-memory edits are saved to the departing profile
+    // even if syncActiveLayoutProfileFromCurrentScreenshot hadn't run yet since the last change.
+    const currentSs = getCurrentScreenshot();
+    if (currentSs) {
+        captureCurrentLayoutToProfile(currentSs, prevKey);
+    }
+
     // Step 1: snapshot every screenshot's current in-memory state into the previous device's profile.
     state.screenshots.forEach(ss => {
         captureCurrentLayoutToProfile(ss, prevKey);
@@ -249,30 +257,34 @@ function switchOutputDeviceWithProfiles(newDevice, newCustomWidth = state.custom
     // Step 2: apply the new device's profile to EVERY screenshot so the whole project
     // is consistent immediately — not just after each card is individually selected.
     isApplyingLayoutProfile = true;
-    state.screenshots.forEach(ss => {
-        const profiles = ensureLayoutProfiles(ss);
-        if (!profiles[nextKey]) {
-            // Brand-new profile: clone from previous device as starting point.
-            if (!cloneLayoutProfile(ss, prevKey, nextKey)) {
-                captureCurrentLayoutToProfile(ss, nextKey);
+    try {
+        state.screenshots.forEach(ss => {
+            const profiles = ensureLayoutProfiles(ss);
+            if (!profiles[nextKey]) {
+                // Brand-new profile: clone from previous device as starting point.
+                if (!cloneLayoutProfile(ss, prevKey, nextKey)) {
+                    captureCurrentLayoutToProfile(ss, nextKey);
+                }
+            } else if (profiles[nextKey].elements === undefined || profiles[nextKey].popouts === undefined) {
+                // One-time migration: profile predates per-device element/popout tracking.
+                const srcProfile = profiles[prevKey];
+                if (profiles[nextKey].elements === undefined) {
+                    profiles[nextKey].elements = srcProfile?.elements !== undefined
+                        ? deepClone(srcProfile.elements)
+                        : [];
+                }
+                if (profiles[nextKey].popouts === undefined) {
+                    profiles[nextKey].popouts = srcProfile?.popouts !== undefined
+                        ? deepClone(srcProfile.popouts)
+                        : [];
+                }
             }
-        } else if (profiles[nextKey].elements === undefined || profiles[nextKey].popouts === undefined) {
-            // One-time migration: profile predates per-device element/popout tracking.
-            const srcProfile = profiles[prevKey];
-            if (profiles[nextKey].elements === undefined) {
-                profiles[nextKey].elements = srcProfile?.elements !== undefined
-                    ? deepClone(srcProfile.elements)
-                    : [];
-            }
-            if (profiles[nextKey].popouts === undefined) {
-                profiles[nextKey].popouts = srcProfile?.popouts !== undefined
-                    ? deepClone(srcProfile.popouts)
-                    : [];
-            }
-        }
-        applyLayoutProfileToScreenshot(ss, nextKey);
-    });
-    isApplyingLayoutProfile = false;
+            applyLayoutProfileToScreenshot(ss, nextKey);
+        });
+    } finally {
+        // Always reset so profile tracking is never permanently broken by an unexpected error.
+        isApplyingLayoutProfile = false;
+    }
 
     syncUIWithState();
     updateGradientStopsUI();
