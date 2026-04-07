@@ -141,6 +141,84 @@ function ensureLayoutProfiles(screenshot) {
     return screenshot.layoutProfiles;
 }
 
+function canonicalizeLayoutProfileKey(rawKey) {
+    if (typeof rawKey !== 'string') return '';
+    const key = rawKey.trim();
+    if (!key) return '';
+
+    // Already canonical
+    if (key in deviceDimensions) return key;
+
+    // Normalize custom-size variants like "custom 1290x2796" or "Custom: 1290 × 2796".
+    const customMatch = key.match(/^custom\s*[:\-]?\s*(\d+)\s*[x×]\s*(\d+)$/i);
+    if (customMatch) {
+        return `custom:${parseInt(customMatch[1], 10)}x${parseInt(customMatch[2], 10)}`;
+    }
+
+    const normalized = key
+        .toLowerCase()
+        .replace(/['"]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const legacyLabelMap = {
+        'iphone 6.9': 'iphone-6.9',
+        'iphone 6.7': 'iphone-6.7',
+        'iphone 6.5': 'iphone-6.5',
+        'iphone 5.5': 'iphone-5.5',
+        'ipad 12.9': 'ipad-12.9',
+        'ipad 11': 'ipad-11',
+        'android phone': 'android-phone',
+        'android phone hd': 'android-phone-hd',
+        'android tablet 7': 'android-tablet-7',
+        'android tablet 10': 'android-tablet-10',
+        'open graph': 'web-og',
+        'twitter/x card': 'web-twitter',
+        'website hero': 'web-hero',
+        'feature graphic': 'web-feature',
+        'instagram large': 'web-insta-large',
+        'instagram small': 'web-insta-small'
+    };
+
+    if (legacyLabelMap[normalized]) return legacyLabelMap[normalized];
+
+    // As a fallback, infer by exact dimensions if they uniquely match one preset.
+    const dimMatch = key.match(/(\d+)\s*[x×]\s*(\d+)/i);
+    if (dimMatch) {
+        const w = parseInt(dimMatch[1], 10);
+        const h = parseInt(dimMatch[2], 10);
+        const matches = Object.entries(deviceDimensions)
+            .filter(([, dims]) => dims.width === w && dims.height === h)
+            .map(([profileKey]) => profileKey);
+        if (matches.length === 1) return matches[0];
+    }
+
+    return key;
+}
+
+function normalizeLayoutProfilesForScreenshot(screenshot) {
+    if (!screenshot) return;
+    const profiles = ensureLayoutProfiles(screenshot);
+    const entries = Object.entries(profiles);
+    const normalizedProfiles = {};
+
+    entries.forEach(([rawKey, profile]) => {
+        if (!profile || typeof profile !== 'object') return;
+        const canonicalKey = canonicalizeLayoutProfileKey(rawKey) || rawKey;
+        if (!normalizedProfiles[canonicalKey]) {
+            normalizedProfiles[canonicalKey] = profile;
+        }
+    });
+
+    screenshot.layoutProfiles = normalizedProfiles;
+
+    // Ensure current profile exists so each screenshot stays attached to active output size.
+    const currentKey = getOutputDeviceProfileKey();
+    if (!screenshot.layoutProfiles[currentKey]) {
+        captureCurrentLayoutToProfile(screenshot, currentKey);
+    }
+}
+
 function deepClone(value) {
     return JSON.parse(JSON.stringify(value));
 }
@@ -2176,6 +2254,7 @@ function loadState() {
                                     overrides: s.overrides || {},
                                     layoutProfiles: s.layoutProfiles || {}
                                 };
+                                normalizeLayoutProfilesForScreenshot(state.screenshots[index]);
                                 loadedCount++;
                                 checkAllLoaded();
                             } else if (hasLocalizedImages) {
@@ -2216,6 +2295,7 @@ function loadState() {
                                                     overrides: s.overrides || {},
                                                     layoutProfiles: s.layoutProfiles || {}
                                                 };
+                                                normalizeLayoutProfilesForScreenshot(state.screenshots[index]);
                                                 loadedCount++;
                                                 checkAllLoaded();
                                             }
@@ -2242,6 +2322,7 @@ function loadState() {
                                                     overrides: s.overrides || {},
                                                     layoutProfiles: s.layoutProfiles || {}
                                                 };
+                                                normalizeLayoutProfilesForScreenshot(state.screenshots[index]);
                                                 loadedCount++;
                                                 checkAllLoaded();
                                             }
@@ -2288,6 +2369,7 @@ function loadState() {
                                         overrides: s.overrides || {},
                                         layoutProfiles: s.layoutProfiles || {}
                                     };
+                                    normalizeLayoutProfilesForScreenshot(state.screenshots[index]);
                                     loadedCount++;
                                     checkAllLoaded();
                                 };
@@ -2320,6 +2402,7 @@ function loadState() {
                                         overrides: s.overrides || {},
                                         layoutProfiles: s.layoutProfiles || {}
                                     };
+                                    normalizeLayoutProfilesForScreenshot(state.screenshots[index]);
                                     loadedCount++;
                                     checkAllLoaded();
                                 };
@@ -6677,7 +6760,7 @@ function showTranslateConfirmDialog(providerName) {
     });
 }
 
-// Translate all text (headlines + subheadlines) from selected source language to all other project languages
+// Translate all text (headlines, subheadlines, and text elements) from selected source language to all other project languages
 async function translateAllText() {
     if (state.projectLanguages.length < 2) {
         await showAppAlert('Add more languages to your project first (via the language menu).', 'info');
@@ -6703,7 +6786,7 @@ async function translateAllText() {
     // Collect all texts that need translation
     const textsToTranslate = [];
 
-    // Go through all screenshots and collect headlines/subheadlines
+    // Go through all screenshots and collect headlines, subheadlines, and text elements
     state.screenshots.forEach((screenshot, index) => {
         const text = screenshot.text || state.text;
 
@@ -6726,10 +6809,25 @@ async function translateAllText() {
                 text: subheadline
             });
         }
+
+        // Text elements
+        (screenshot.elements || []).forEach(el => {
+            if (el.type !== 'text') return;
+            const elText = (el.texts?.[sourceLang] ?? el.texts?.['en'] ?? el.text ?? '').trim();
+            if (elText) {
+                textsToTranslate.push({
+                    type: 'element-text',
+                    screenshotIndex: index,
+                    elementId: el.id,
+                    elementName: el.name || 'Text',
+                    text: elText
+                });
+            }
+        });
     });
 
     if (textsToTranslate.length === 0) {
-        await showAppAlert(`No text found in ${languageNames[sourceLang] || sourceLang}. Add headlines or subheadlines first.`, 'info');
+        await showAppAlert(`No text found in ${languageNames[sourceLang] || sourceLang}. Add headlines, subheadlines, or text elements first.`, 'info');
         return;
     }
 
@@ -6776,31 +6874,31 @@ async function translateAllText() {
         const screenshotGroups = {};
         textsToTranslate.forEach((item, i) => {
             if (!screenshotGroups[item.screenshotIndex]) {
-                screenshotGroups[item.screenshotIndex] = { headline: null, subheadline: null, indices: {} };
+                screenshotGroups[item.screenshotIndex] = { items: [] };
             }
-            screenshotGroups[item.screenshotIndex][item.type] = item.text;
-            screenshotGroups[item.screenshotIndex].indices[item.type] = i;
+            screenshotGroups[item.screenshotIndex].items.push({ ...item, idx: i });
         });
 
-        // Build context-rich prompt showing screenshot groupings
+        // Build context-rich prompt showing all texts grouped by screenshot
         let contextualTexts = '';
         Object.keys(screenshotGroups).sort((a, b) => Number(a) - Number(b)).forEach(screenshotIdx => {
             const group = screenshotGroups[screenshotIdx];
-            contextualTexts += `\nScreenshot ${Number(screenshotIdx) + 1}:\n`;
-            if (group.headline !== null) {
-                contextualTexts += `  [${group.indices.headline}] Headline: "${group.headline}"\n`;
-            }
-            if (group.subheadline !== null) {
-                contextualTexts += `  [${group.indices.subheadline}] Subheadline: "${group.subheadline}"\n`;
-            }
+            const screenshotName = state.screenshots[Number(screenshotIdx)]?.name || `Screenshot ${Number(screenshotIdx) + 1}`;
+            contextualTexts += `\nScreenshot ${Number(screenshotIdx) + 1} (${screenshotName}):\n`;
+            group.items.forEach(item => {
+                const label = item.type === 'headline' ? 'Headline'
+                    : item.type === 'subheadline' ? 'Subheadline'
+                    : `Text element "${item.elementName}"`;
+                contextualTexts += `  [${item.idx}] ${label}: "${item.text}"\n`;
+            });
         });
 
         const prompt = `You are a professional translator for App Store screenshot marketing copy. Translate the following texts from ${languageNames[sourceLang]} to these languages: ${targetLangNames}.
 
-CONTEXT: These are marketing texts for app store screenshots. Each screenshot has a headline and/or subheadline that work together as a pair. The subheadline typically elaborates on or supports the headline. When translating, ensure:
-- Headlines and subheadlines on the same screenshot remain thematically consistent
+CONTEXT: These are marketing texts for app store screenshots. Each screenshot may have a headline, subheadline, and overlay text elements — all working together to convey a single feature or benefit. When translating, ensure:
+- All texts within the same screenshot remain thematically consistent with each other
 - Translations across all screenshots maintain a cohesive marketing voice
-- SIMILAR LENGTH to the originals - do NOT make translations longer, as they must fit on screen
+- SIMILAR LENGTH to the originals — do NOT make translations longer, as they must fit on screen
 - Marketing-focused and compelling language
 - Culturally appropriate for each target market
 - Natural-sounding in each language
@@ -6809,7 +6907,6 @@ IMPORTANT: The translated text will be displayed on app screenshots with limited
 
 Source texts (${languageNames[sourceLang]}):
 ${contextualTexts}
-
 Respond ONLY with a valid JSON object. The structure should be:
 {
   "0": {"de": "German translation", "fr": "French translation", ...},
@@ -6862,18 +6959,34 @@ Translate to these language codes: ${targetLangs.join(', ')}`;
             const text = screenshot.text || state.text;
 
             targetLangs.forEach(lang => {
-                if (itemTranslations[lang]) {
-                    if (item.type === 'headline') {
-                        if (!text.headlines) text.headlines = {};
-                        text.headlines[lang] = itemTranslations[lang];
-                    } else {
-                        if (!text.subheadlines) text.subheadlines = {};
-                        text.subheadlines[lang] = itemTranslations[lang];
-                        // Enable subheadline display when translations are added
-                        text.subheadlineEnabled = true;
+                if (!itemTranslations[lang]) return;
+                if (item.type === 'headline') {
+                    if (!text.headlines) text.headlines = {};
+                    text.headlines[lang] = itemTranslations[lang];
+                } else if (item.type === 'subheadline') {
+                    if (!text.subheadlines) text.subheadlines = {};
+                    text.subheadlines[lang] = itemTranslations[lang];
+                    // Enable subheadline display when translations are added
+                    text.subheadlineEnabled = true;
+                } else if (item.type === 'element-text') {
+                    // Update live elements array
+                    const el = (screenshot.elements || []).find(e => e.id === item.elementId);
+                    if (el) {
+                        if (!el.texts) el.texts = {};
+                        el.texts[lang] = itemTranslations[lang];
                     }
-                    appliedCount++;
+                    // Also patch every layout profile snapshot so navigating away doesn't revert the translation
+                    if (screenshot.layoutProfiles) {
+                        Object.values(screenshot.layoutProfiles).forEach(profile => {
+                            const profileEl = (profile.elements || []).find(e => e.id === item.elementId);
+                            if (profileEl) {
+                                if (!profileEl.texts) profileEl.texts = {};
+                                profileEl.texts[lang] = itemTranslations[lang];
+                            }
+                        });
+                    }
                 }
+                appliedCount++;
             });
         });
 
