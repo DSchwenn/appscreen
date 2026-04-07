@@ -621,6 +621,23 @@ function movePopout(id, direction) {
     updatePopoutsList();
 }
 
+// When a new element is added, push a serialized copy of it into every
+// already-existing layout profile so the element is visible on all
+// resolutions right away. Each profile can then independently adjust
+// position/size; deletion remains per-resolution.
+function propagateNewElementToAllProfiles(screenshot, el) {
+    if (!screenshot?.layoutProfiles) return;
+    const currentKey = getOutputDeviceProfileKey();
+    const serialized = deepClone({ ...el, image: undefined });
+    Object.entries(screenshot.layoutProfiles).forEach(([key, profile]) => {
+        if (key === currentKey) return; // current profile handled by syncActiveLayoutProfileFromCurrentScreenshot
+        if (!Array.isArray(profile.elements)) profile.elements = [];
+        if (!profile.elements.some(e => e.id === el.id)) {
+            profile.elements.push(serialized);
+        }
+    });
+}
+
 function addGraphicElement(img, src, name, svgRaw = null) {
     const screenshot = getCurrentScreenshot();
     if (!screenshot) return;
@@ -658,6 +675,7 @@ function addGraphicElement(img, src, name, svgRaw = null) {
         frameScale: 100
     };
     screenshot.elements.push(el);
+    propagateNewElementToAllProfiles(screenshot, el);
     selectedElementId = el.id;
     updateCanvas();
     updateElementsList();
@@ -691,6 +709,7 @@ function addTextElement() {
         frameScale: 100
     };
     screenshot.elements.push(el);
+    propagateNewElementToAllProfiles(screenshot, el);
     selectedElementId = el.id;
     updateCanvas();
     updateElementsList();
@@ -768,6 +787,7 @@ function addEmojiElement(emoji, name) {
         frameScale: 100
     };
     screenshot.elements.push(el);
+    propagateNewElementToAllProfiles(screenshot, el);
     selectedElementId = el.id;
     updateCanvas();
     updateElementsList();
@@ -806,6 +826,7 @@ async function addIconElement(iconName) {
         frameScale: 100
     };
     screenshot.elements.push(el);
+    propagateNewElementToAllProfiles(screenshot, el);
     selectedElementId = el.id;
     updateElementsList();
     updateElementProperties();
